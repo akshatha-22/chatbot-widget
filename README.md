@@ -27,7 +27,6 @@ A production-ready, feature-rich chatbot widget system that combines general-pur
 
 ### Prerequisites
 
-- **Windows 11 with i5 Processor** (or any modern system)
 - **Python 3.9+** (for backend)
 - **Node.js 16+** (for frontend)
 - **Docker** (optional, for containerization)
