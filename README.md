@@ -40,29 +40,29 @@ A production-ready, feature-rich chatbot widget system that combines general-pur
 git clone https://github.com/yourusername/chatbot-widget.git
 cd chatbot-widget
 
-# 2. Setup backend
+# 2. Configure environment (repo root — used by backend + Vite)
+cp .env.ex  zdkoample .env.local
+# Edit .env.local: GEMINI_API_KEY (and JWT/DB settings as needed)
+
+# 3. Backend
 cd backend
 python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Setup frontend
-cd ../frontend
+# 4. Widget (workspace app under client/)
+cd ..
 npm install
 
-# 4. Configure environment
-cp .env.example .env
-# Edit .env and add your GOOGLE_API_KEY
-
-# 5. Run development servers
-# Terminal 1: Backend
+# 5. Run development servers (from repo root in two terminals)
+# Terminal 1 — API
 cd backend && python -m uvicorn app.main:app --reload
 
-# Terminal 2: Frontend
-cd frontend && npm start
+# Terminal 2 — Vite widget
+npm run dev
 
-# 6. Access the widget
-# Open http://localhost:3000 in your browser
+# 6. Open the app
+# http://localhost:5173 (Vite prints the exact URL)
 ```
 
 ---
@@ -963,20 +963,14 @@ chatbot-widget/
 │   │   └── core/              # Core utilities
 │   ├── tests/                 # Test files
 │   ├── requirements.txt        # Dependencies
-│   └── Dockerfile             # Docker config
+│   └── Dockerfile             # Backend image (see also docker/backend.Dockerfile)
 │
-├── frontend/                   # React frontend
+├── client/                    # React + Vite widget (npm workspace)
 │   ├── src/
-│   │   ├── components/        # React components
-│   │   ├── pages/             # Page components
-│   │   ├── hooks/             # Custom hooks
-│   │   ├── services/          # API services
-│   │   ├── store/             # State management
-│   │   ├── types/             # TypeScript types
-│   │   └── styles/            # Global styles
-│   ├── tests/                 # Test files
-│   ├── package.json           # Dependencies
-│   └── Dockerfile             # Docker config
+│   │   └── components/        # Floating widget, Auth, Chat UI
+│   ├── public/
+│   ├── vite.config.ts
+│   └── package.json
 │
 ├── docs/                       # Documentation
 │   ├── 01_system_overview.md
@@ -993,7 +987,7 @@ chatbot-widget/
 │
 ├── docker/                     # Docker configs
 │   ├── backend.Dockerfile
-│   ├── frontend.Dockerfile
+│   ├── client.Dockerfile      # Builds static widget from ./client
 │   ├── nginx.conf
 │   └── kubernetes/            # (OPTIONAL) K8s configs
 │
@@ -1177,25 +1171,18 @@ alembic upgrade head
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### Frontend Setup
+#### Widget (`client/` + Vite)
 
 ```bash
-# Navigate to frontend directory
-cd frontend
-
-# Install dependencies
+# From repo root (recommended — installs the client workspace + matches package.json scripts)
 npm install
 
-# Create .env file
-copy .env.example .env
+# Env: use repo-root .env.local (Vite envDir includes parent folder)
+copy .env.example .env.local
+# Ensure VITE_API_URL=http://localhost:8000 (or your API origin)
 
-# Edit .env and add API endpoint
-# VITE_API_URL=http://localhost:8000
-
-# Start development server
 npm run dev
-
-# Open http://localhost:5173 in browser
+# Open the URL shown in the terminal (default http://127.0.0.1:5173)
 ```
 
 #### Database Setup
@@ -1369,7 +1356,7 @@ Response:
 # Using Docker Compose
 docker-compose up -d
 
-# Access at http://localhost:3000
+# Local dev widget: npm run dev → usually http://127.0.0.1:5173
 ```
 
 ### Production Deployment
@@ -1389,8 +1376,8 @@ kubectl create namespace chatbot
 # Deploy backend
 kubectl apply -f docker/kubernetes/backend-deployment.yaml -n chatbot
 
-# Deploy frontend
-kubectl apply -f docker/kubernetes/frontend-deployment.yaml -n chatbot
+# Deploy widget (SPA, nginx — build with docker/client.Dockerfile first)
+kubectl apply -f docker/kubernetes/client-deployment.yaml -n chatbot
 
 # Deploy services
 kubectl apply -f docker/kubernetes/service.yaml -n chatbot
