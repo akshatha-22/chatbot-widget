@@ -76,7 +76,7 @@ cd backend
 pip install -r requirements.txt
 
 # Frontend
-cd ../frontend
+cd ../client
 npm install
 ```
 
@@ -109,7 +109,7 @@ cd backend
 python main.py
 
 # Terminal 2: Frontend
-cd frontend
+cd client
 npm run dev
 
 # Terminal 3: Redis (if not running as service)
@@ -187,20 +187,17 @@ services:
       - ./backend:/app
     command: python main.py
 
-  # Frontend
-  frontend:
+  # Widget (Vite build + nginx — see docker/client.Dockerfile)
+  widget:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/client.Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
     ports:
-      - "3000:3000"
-    environment:
-      REACT_APP_API_URL: http://backend:8000/api/v1
-      REACT_APP_WS_URL: ws://backend:8000/ws
+      - "8080:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
 
 volumes:
   postgres_data:
@@ -240,34 +237,22 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 CMD ["python", "main.py"]
 ```
 
-#### Step 3: Create Frontend Dockerfile
+#### Step 3: Widget image (`docker/client.Dockerfile`)
+
+The repo ships a multi-stage Dockerfile that runs `npm run build` in `client/` and serves `dist/` with nginx (port 80). Build from the **repository root**:
+
+```bash
+docker build -f docker/client.Dockerfile -t chatbot-widget-client:latest .
+```
+
+For Kubernetes, apply `docker/kubernetes/client-deployment.yaml` after tagging and pushing your image.
+
+
+#### Step 3b (alternate): Inline Dockerfile snippet
 
 ```dockerfile
-# frontend/Dockerfile
-FROM node:18-alpine as builder
-
-WORKDIR /app
-
-COPY package*.json ./
-
-RUN npm ci
-
-COPY . .
-
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine
-
-WORKDIR /app
-
-RUN npm install -g serve
-
-COPY --from=builder /app/dist ./dist
-
-EXPOSE 3000
-
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Prefer docker/client.Dockerfile in this repo instead of duplicating.
+# Legacy CRA-style example removed — use Vite + nginx as in docker/client.Dockerfile.
 ```
 
 #### Step 4: Create .env File
@@ -313,8 +298,8 @@ docker-compose ps
 # Test API
 curl http://localhost:8000/health
 
-# Access frontend
-open http://localhost:3000
+# Access widget (docker-compose `widget` service maps 8080→80)
+open http://localhost:8080
 ```
 
 ---
@@ -507,64 +492,42 @@ spec:
   type: LoadBalancer
 ```
 
-### Step 6: Create Frontend Deployment
+### Step 6: Create widget (client) Deployment
 
 ```yaml
-# k8s/frontend-deployment.yaml
+# Matches docker/kubernetes/client-deployment.yaml in this repo (nginx on port 80).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend
+  name: chatbot-widget-client
   namespace: chatbot-widget
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: frontend
+      app: chatbot-widget-client
   template:
     metadata:
       labels:
-        app: frontend
+        app: chatbot-widget-client
     spec:
       containers:
-      - name: frontend
-        image: your-registry/chatbot-widget-frontend:latest
+      - name: nginx
+        image: your-registry/chatbot-widget-client:latest
         ports:
-        - containerPort: 3000
-        envFrom:
-        - configMapRef:
-            name: chatbot-config
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
+        - containerPort: 80
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend
+  name: chatbot-widget-client
   namespace: chatbot-widget
 spec:
   selector:
-    app: frontend
+    app: chatbot-widget-client
   ports:
-  - port: 3000
-    targetPort: 3000
+  - port: 80
+    targetPort: 80
   type: LoadBalancer
 ```
 
@@ -581,7 +544,7 @@ kubectl apply -f k8s/secrets.yaml
 # Deploy services
 kubectl apply -f k8s/postgres-deployment.yaml
 kubectl apply -f k8s/backend-deployment.yaml
-kubectl apply -f k8s/frontend-deployment.yaml
+kubectl apply -f k8s/client-deployment.yaml
 
 # Check deployment status
 kubectl get deployments -n chatbot-widget
@@ -593,7 +556,7 @@ kubectl logs -n chatbot-widget -f deployment/backend
 
 # Port forward for testing
 kubectl port-forward -n chatbot-widget svc/backend 8000:8000
-kubectl port-forward -n chatbot-widget svc/frontend 3000:3000
+kubectl port-forward -n chatbot-widget svc/chatbot-widget-client 8080:80
 ```
 
 ---
@@ -607,7 +570,7 @@ kubectl port-forward -n chatbot-widget svc/frontend 3000:3000
 ```bash
 # Create repositories
 aws ecr create-repository --repository-name chatbot-widget-backend
-aws ecr create-repository --repository-name chatbot-widget-frontend
+aws ecr create-repository --repository-name chatbot-widget-client
 
 # Push images
 docker tag chatbot-widget-backend:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/chatbot-widget-backend:latest
@@ -663,8 +626,8 @@ aws ecs create-service \
 # Build backend
 gcloud builds submit --tag gcr.io/PROJECT_ID/chatbot-widget-backend ./backend
 
-# Build frontend
-gcloud builds submit --tag gcr.io/PROJECT_ID/chatbot-widget-frontend ./frontend
+# Build widget Docker image (from repo root)
+gcloud builds submit --tag gcr.io/PROJECT_ID/chatbot-widget-client ./client
 ```
 
 #### Step 2: Deploy Backend
@@ -682,8 +645,8 @@ gcloud run deploy chatbot-widget-backend \
 #### Step 3: Deploy Frontend
 
 ```bash
-gcloud run deploy chatbot-widget-frontend \
-  --image gcr.io/PROJECT_ID/chatbot-widget-frontend \
+gcloud run deploy chatbot-widget-client \
+  --image gcr.io/PROJECT_ID/chatbot-widget-client \
   --platform managed \
   --region us-central1 \
   --set-env-vars REACT_APP_API_URL=<backend_url> \
@@ -730,14 +693,14 @@ az webapp deployment source config-zip \
 az webapp create \
   --resource-group chatbot-widget \
   --plan chatbot-widget-plan \
-  --name chatbot-widget-frontend \
+  --name chatbot-widget-client \
   --runtime "NODE|18-lts"
 
 # Configure deployment
 az webapp deployment source config-zip \
   --resource-group chatbot-widget \
-  --name chatbot-widget-frontend \
-  --src frontend.zip
+  --name chatbot-widget-client \
+  --src client-dist.zip
 ```
 
 ---
@@ -844,7 +807,7 @@ jobs:
           pip install -r requirements.txt
           pytest
           
-          cd ../frontend
+          cd ../client
           npm install
           npm test
 
@@ -857,9 +820,9 @@ jobs:
       - name: Build and push Docker images
         run: |
           docker build -t backend:latest ./backend
-          docker build -t frontend:latest ./frontend
+          docker build -f docker/client.Dockerfile -t chatbot-widget-client:latest .
           docker push backend:latest
-          docker push frontend:latest
+          docker push chatbot-widget-client:latest
 
   deploy:
     needs: build
