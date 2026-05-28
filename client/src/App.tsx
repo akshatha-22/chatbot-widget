@@ -19,7 +19,7 @@ export default function App() {
 
   return (
     <>
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex h-screen items-center justify-center bg-[#F3F4F6]">
         <div className="text-center">
           <p className="text-gray-500 text-sm mb-2">Signed in as {user.email}</p>
           <p className="text-gray-400 text-sm">Click the chat button to open Remi</p>

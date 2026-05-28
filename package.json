@@ -1,0 +1,25 @@
+{
+  "name": "chatbot-widget",
+  "version": "1.0.0",
+  "description": "Floating Chatbot Launcher - Design system and React frontend",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "client",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "preview": "cd client && npm run preview",
+    "type-check": "cd client && npm run type-check"
+  },
+  "keywords": [
+    "chatbot",
+    "widget",
+    "react",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT"
+}

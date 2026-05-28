@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import CompactWidget from './CompactWidget'
 import ExpandedWidget from './ExpandedWidget'
+import RemiLauncher from './RemiLauncher'
 import {
   createConversation,
   deleteConversation,
@@ -136,21 +137,12 @@ const ChatbotWidget = () => {
   }
 
   if (!isOpen) {
-    return (
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-indigo-500 rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-600 transition-colors z-50"
-        aria-label="Open chat"
-      >
-        <span className="text-white text-xl">💬</span>
-      </button>
-    )
+    return <RemiLauncher onClick={() => setIsOpen(true)} />
   }
 
   if (!chatReady) {
     return (
-      <div className="fixed bottom-[88px] right-5 w-[350px] rounded-2xl border border-gray-200 bg-white shadow-xl p-6 z-50 text-sm text-gray-400">
+      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-gray-200 bg-white shadow-xl p-6 z-50 text-sm text-gray-400">
         Loading chat…
       </div>
     )
