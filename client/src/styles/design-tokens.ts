@@ -1,0 +1,84 @@
+/**
+ * Design Tokens
+ * Central place for all design system values
+ */
+
+export const colors = {
+  primary: {
+    50: '#f0f9ff',
+    100: '#e0f2fe',
+    500: '#0ea5e9',
+    600: '#0284c7',
+    700: '#0369a1',
+    900: '#082f49',
+  },
+  neutral: {
+    50: '#fafafa',
+    100: '#f5f5f5',
+    200: '#e5e5e5',
+    500: '#a3a3a3',
+    700: '#404040',
+    900: '#171717',
+  },
+  semantic: {
+    success: '#10b981',
+    error: '#ef4444',
+    warning: '#f59e0b',
+    info: '#3b82f6',
+  },
+}
+
+export const typography = {
+  fontFamily: {
+    sans: 'system-ui, -apple-system, sans-serif',
+    mono: 'ui-monospace, monospace',
+  },
+  fontSize: {
+    xs: '12px',
+    sm: '14px',
+    base: '16px',
+    lg: '18px',
+    xl: '20px',
+    '2xl': '24px',
+  },
+  fontWeight: {
+    normal: 400,
+    medium: 500,
+    semibold: 600,
+    bold: 700,
+  },
+  lineHeight: {
+    tight: 1.2,
+    normal: 1.5,
+    relaxed: 1.75,
+  },
+}
+
+export const spacing = {
+  xs: '4px',
+  sm: '8px',
+  md: '12px',
+  lg: '16px',
+  xl: '24px',
+  '2xl': '32px',
+}
+
+export const borderRadius = {
+  sm: '4px',
+  md: '8px',
+  lg: '12px',
+  full: '9999px',
+}
+
+export const shadows = {
+  sm: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+  md: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+  lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+  xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+}
+
+export const transitions = {
+  fast: '150ms ease-in-out',
+  base: '200ms ease-in-out',
+  slow: '300ms ease-in-out',
+}
