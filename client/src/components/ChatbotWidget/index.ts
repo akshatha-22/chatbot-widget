@@ -1,0 +1,10 @@
+// Main widget components
+export { default as ChatbotWidget } from './index.tsx'
+export { default as FloatingWidget } from './index.tsx'
+export { default as CompactWidget } from './CompactWidget'
+export { default as ExpandedWidget } from './ExpandedWidget'
+export { default as ChatInterface } from './ChatInterface'
+export { default as AssistantMarkdown } from './AssistantMarkdown'
+export type { ChatInterfaceProps } from './ChatInterface'
+export { default as Dashboard } from './Dashboard'
+export { default as FilePanel } from './FilePanel'
