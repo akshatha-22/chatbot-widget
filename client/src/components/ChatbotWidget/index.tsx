@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import CompactWidget from './CompactWidget'
 import ExpandedWidget from './ExpandedWidget'
 import RemiLauncher from './RemiLauncher'
+import WidgetAuthPanel from './WidgetAuthPanel'
 import {
   createConversation,
   deleteConversation,
   getConversationMessages,
   getConversations,
+  renameConversation,
 } from '../../api/chat'
+import { getMe, logout as apiLogout } from '../../api/auth'
 import { listFiles } from '../../api/files'
 import { loadStarredIds, toggleStarredId } from '../../utils/starredStorage'
-import type { Conversation, Message, UploadedFile } from '../../types'
+import type { Conversation, Message, UploadedFile, User } from '../../types'
 
 const ChatbotWidget = () => {
   const [isOpen, setIsOpen] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(
     null,
@@ -23,6 +28,40 @@ const ChatbotWidget = () => {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [starredIds, setStarredIds] = useState<Set<string>>(() => loadStarredIds())
   const [chatReady, setChatReady] = useState(false)
+  const [hasUnread, setHasUnread] = useState(false)
+  const seenAssistantCount = useRef(0)
+
+  // Verify any existing token once on mount — the widget owns its own auth.
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      setAuthChecked(true)
+      return
+    }
+    getMe()
+      .then((me: User) => setUser(me))
+      .catch(() => localStorage.removeItem('token'))
+      .finally(() => setAuthChecked(true))
+  }, [])
+
+  useEffect(() => {
+    const assistantCount = messages.filter((m) => m.role === 'assistant').length
+    if (isOpen) {
+      seenAssistantCount.current = assistantCount
+      return
+    }
+    if (assistantCount > seenAssistantCount.current) {
+      setHasUnread(true)
+    }
+  }, [messages, isOpen])
+
+  const openWidget = useCallback(() => {
+    setIsOpen(true)
+    setHasUnread(false)
+    seenAssistantCount.current = messages.filter(
+      (m) => m.role === 'assistant',
+    ).length
+  }, [messages])
 
   const refreshConversations = useCallback(async () => {
     const list = await getConversations()
@@ -43,6 +82,7 @@ const ChatbotWidget = () => {
   }, [])
 
   useEffect(() => {
+    if (!user) return
     let cancelled = false
 
     async function init() {
@@ -70,7 +110,7 @@ const ChatbotWidget = () => {
     return () => {
       cancelled = true
     }
-  }, [loadConversationData])
+  }, [user, loadConversationData])
 
   const handleSelectConversation = useCallback(
     async (conv: Conversation) => {
@@ -106,13 +146,19 @@ const ChatbotWidget = () => {
     [activeConversation?.id, conversations, loadConversationData],
   )
 
-  const handleRenameConversation = useCallback((title: string) => {
+  const handleRenameConversation = useCallback(async (title: string) => {
     if (!activeConversation) return
-    const updated = { ...activeConversation, title }
-    setActiveConversation(updated)
+    const id = activeConversation.id
+    // Optimistic update so UI and sidebar stay in sync before any refresh.
+    setActiveConversation((prev) => (prev ? { ...prev, title } : null))
     setConversations((prev) =>
-      prev.map((c) => (c.id === updated.id ? { ...c, title } : c)),
+      prev.map((c) => (c.id === id ? { ...c, title } : c)),
     )
+    try {
+      await renameConversation(id, title)
+    } catch (err) {
+      console.error('Failed to rename conversation:', err)
+    }
   }, [activeConversation])
 
   const handleToggleStar = useCallback((id: string) => {
@@ -124,6 +170,18 @@ const ChatbotWidget = () => {
     setIsExpanded(false)
   }
 
+  const handleLogout = useCallback(() => {
+    apiLogout()
+    setUser(null)
+    setChatReady(false)
+    setConversations([])
+    setActiveConversation(null)
+    setMessages([])
+    setFiles([])
+    setIsExpanded(false)
+    seenAssistantCount.current = 0
+  }, [])
+
   const sharedProps = {
     conversation: activeConversation,
     messages,
@@ -131,18 +189,32 @@ const ChatbotWidget = () => {
     onMessagesChange: setMessages,
     onFilesChange: setFiles,
     onClose: close,
+    onLogout: handleLogout,
     starredIds,
     onToggleStar: handleToggleStar,
     onRefreshConversations: refreshConversations,
   }
 
   if (!isOpen) {
-    return <RemiLauncher onClick={() => setIsOpen(true)} />
+    return <RemiLauncher onClick={openWidget} hasUnread={hasUnread} />
+  }
+
+  // Widget open but auth still resolving / not signed in → show auth panel.
+  if (!authChecked) {
+    return (
+      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] p-6 z-50 text-sm text-[#8C8C8C] animate-widgetIn origin-bottom-right">
+        Loading…
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <WidgetAuthPanel onSuccess={setUser} onClose={close} />
   }
 
   if (!chatReady) {
     return (
-      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-gray-200 bg-white shadow-xl p-6 z-50 text-sm text-gray-400">
+      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] p-6 z-50 text-sm text-[#8C8C8C] animate-widgetIn origin-bottom-right">
         Loading chat…
       </div>
     )
