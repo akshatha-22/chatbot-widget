@@ -30,7 +30,6 @@ const ChatbotWidget = () => {
   const [chatReady, setChatReady] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
   const seenAssistantCount = useRef(0)
-  const chatInitRef = useRef(false)
 
   // Verify any existing token once on mount — the widget owns its own auth.
   useEffect(() => {
@@ -83,9 +82,11 @@ const ChatbotWidget = () => {
   }, [])
 
   useEffect(() => {
-    if (!user) return
-    if (chatInitRef.current) return
-    chatInitRef.current = true
+    if (!user) {
+      setChatReady(false)
+      return
+    }
+
     let cancelled = false
 
     async function init() {
@@ -104,12 +105,16 @@ const ChatbotWidget = () => {
           setMessages([])
           setFiles([])
         }
+      } catch (err) {
+        console.error('Failed to initialize chat:', err)
       } finally {
         if (!cancelled) setChatReady(true)
       }
     }
 
-    init()
+    setChatReady(false)
+    void init()
+
     return () => {
       cancelled = true
     }
@@ -190,7 +195,6 @@ const ChatbotWidget = () => {
 
   const handleLogout = useCallback(() => {
     apiLogout()
-    chatInitRef.current = false
     setUser(null)
     setChatReady(false)
     setConversations([])
