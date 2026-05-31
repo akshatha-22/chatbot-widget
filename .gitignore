@@ -25,6 +25,11 @@ backend/.env.local
 # Local databases & uploads
 *.db
 backend/data/uploads/
+backend/data/vector_store/
+
+# HuggingFace / ML caches (never commit)
+.huggingface/
+**/.cache/
 
 # Build / IDE
 dist/
