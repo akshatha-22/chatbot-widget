@@ -8,17 +8,43 @@ import {
   Search,
   Star,
   Check,
+  Loader2,
   LayoutList,
+  LogOut,
 } from 'lucide-react'
 import { streamMessage } from '../../api/chat'
+import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import { uploadFile } from '../../api/files'
 import ChatInterface from './ChatInterface'
 import WidgetConversationDashboard from './WidgetConversationDashboard'
+import RemiAvatar2D from './RemiAvatar2D'
 import type { Message, Conversation, UploadedFile } from '../../types'
 import FileUploadModal from './FileUploadModal'
 import FileGenerationPanel from './FileGenerationPanel'
 
 type View = 'chat' | 'dashboard'
+
+const FILE_TYPE_COLORS: Record<string, string> = {
+  pdf: '#EF4444',
+  doc: '#3B82F6',
+  docx: '#3B82F6',
+  xls: '#22C55E',
+  xlsx: '#22C55E',
+  csv: '#22C55E',
+  txt: '#8C8C8C',
+  md: '#8C8C8C',
+}
+
+function fileIconColor(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  return FILE_TYPE_COLORS[ext] ?? '#8C8C8C'
+}
+
+function formatConvTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
 
 export type ExpandedWidgetProps = {
   conversation: Conversation | null
@@ -36,6 +62,7 @@ export type ExpandedWidgetProps = {
   onRenameConversation: (title: string) => void
   onCollapse: () => void
   onClose: () => void
+  onLogout?: () => void
 }
 
 export default function ExpandedWidget({
@@ -54,6 +81,7 @@ export default function ExpandedWidget({
   onRenameConversation,
   onCollapse,
   onClose,
+  onLogout,
 }: ExpandedWidgetProps) {
   const [view, setView] = useState<View>('chat')
   const [input, setInput] = useState('')
@@ -136,9 +164,19 @@ export default function ExpandedWidget({
         },
         onDone: (msg) => {
           setIsTyping(false)
-          onMessagesChange((prev) =>
-            prev.map((m) => (m.id === assistantId ? msg : m)),
-          )
+          onMessagesChange((prev) => {
+            const existing = prev.find((m) => m.id === assistantId)
+            if (existing) {
+              return prev.map((m) => (m.id === assistantId ? msg : m))
+            }
+            return [...prev, msg]
+          })
+          if (msg.has_pdf && msg.pdf_content) {
+            void generatePDFFromContent(
+              msg.pdf_content,
+              msg.pdf_filename || 'remi-generated.pdf',
+            )
+          }
           flashSaved()
           void onRefreshConversations()
         },
@@ -193,44 +231,61 @@ export default function ExpandedWidget({
     c.title.toLowerCase().includes(search.toLowerCase()),
   )
 
-  const headerTitle =
-    view === 'dashboard' ? 'All Conversations' : conversation?.title ?? 'Remi Chat'
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-white">
-      <div className="bg-indigo-500 h-14 flex items-center justify-between px-4 shrink-0 relative">
+    <div className="fixed inset-0 z-50 flex flex-col bg-white animate-widgetIn">
+      <div className="h-14 flex items-center justify-between px-4 shrink-0 relative border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA]">
         {view === 'chat' ? (
           <button
             type="button"
             onClick={() => setSidebarOpen((p) => !p)}
-            className="text-white/80 hover:text-white"
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Toggle sidebar"
           >
             <Menu size={20} />
           </button>
         ) : (
           <div className="w-5" />
         )}
-        <span className="text-white font-semibold text-base absolute left-1/2 -translate-x-1/2 truncate max-w-[50%]">
-          {headerTitle}
-        </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 absolute left-1/2 -translate-x-1/2">
+          <RemiAvatar2D size={36} />
+          <div>
+            <p className="text-sm font-semibold text-[#1A1A1A]">Remi</p>
+            <p className="flex items-center gap-1 text-xs text-[#8C8C8C]">
+              <span className="h-2 w-2 rounded-full bg-[#22C55E]" />
+              Online
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
           {view === 'chat' && showSaved && (
-            <span className="flex items-center gap-1 text-xs text-white/95 font-medium animate-fadeIn">
-              <Check size={14} className="text-green-300" />
+            <span className="flex items-center gap-1 text-xs text-[#22C55E] font-medium animate-fadeIn">
+              <Check size={14} />
               Saved
             </span>
+          )}
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+              aria-label="Sign out"
+            >
+              <LogOut size={18} />
+            </button>
           )}
           <button
             type="button"
             onClick={onCollapse}
-            className="text-white/80 hover:text-white"
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Collapse"
           >
             <Minimize2 size={18} />
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="text-white/80 hover:text-white"
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Close"
           >
             <X size={18} />
           </button>
@@ -247,31 +302,32 @@ export default function ExpandedWidget({
       ) : (
         <div className="flex flex-1 overflow-hidden min-h-0">
           {sidebarOpen && (
-            <aside className="w-1/4 min-w-[200px] max-w-[280px] border-r border-gray-200 bg-gray-50 flex flex-col">
-              <div className="p-3 space-y-2 border-b border-gray-200">
+            <aside className="w-1/4 min-w-[200px] max-w-[280px] border-r border-[#F0F0F0] bg-[#FAFAFA] flex flex-col">
+              <div className="p-3 space-y-2 border-b border-[#F0F0F0]">
                 <div className="relative">
                   <Search
                     size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[#ACACAC]"
                   />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search conversations"
-                    className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white outline-none focus:border-indigo-400"
+                    className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border-0 bg-white text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => void onNewConversation()}
-                  className="w-full py-1.5 rounded-lg bg-indigo-500 text-white text-sm font-medium hover:bg-indigo-600"
+                  className="w-full py-2 rounded-[10px] bg-[#F59E0B] text-white text-sm font-semibold hover:bg-[#D97706] active:scale-[0.98] transition-all shadow-[0_2px_8px_rgba(245,158,11,0.3)]"
                 >
                   + New Chat
                 </button>
               </div>
-              <nav className="flex-1 overflow-y-auto p-2 space-y-1">
+              <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
                 {filtered.map((c) => {
                   const starred = starredIds.has(c.id)
+                  const isActive = conversation?.id === c.id
                   return (
                     <div
                       key={c.id}
@@ -284,10 +340,10 @@ export default function ExpandedWidget({
                           void openConversation(c)
                         }
                       }}
-                      className={`group flex items-center gap-1 rounded-lg px-2 py-2 text-sm cursor-pointer ${
-                        conversation?.id === c.id
-                          ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-gray-600 hover:bg-gray-100'
+                      className={`group relative flex items-start gap-1.5 rounded-lg px-2.5 py-2 cursor-pointer transition-colors duration-150 ${
+                        isActive
+                          ? 'bg-[#FFFBF0] border-l-[3px] border-[#F59E0B] pl-2'
+                          : 'border-l-[3px] border-transparent hover:bg-[#F5F5F5]'
                       }`}
                     >
                       <button
@@ -296,23 +352,36 @@ export default function ExpandedWidget({
                           e.stopPropagation()
                           onToggleStar(c.id)
                         }}
-                        className={`p-1 rounded-md shrink-0 ${
+                        className={`p-0.5 rounded-md shrink-0 mt-0.5 ${
                           starred
-                            ? 'text-yellow-500'
-                            : 'text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100'
-                        } ${starred ? 'opacity-100' : ''}`}
+                            ? 'text-[#F59E0B] opacity-100'
+                            : 'text-[#ACACAC] hover:text-[#8C8C8C] opacity-0 group-hover:opacity-100'
+                        }`}
                         aria-label={starred ? 'Unstar' : 'Star conversation'}
                       >
-                        <Star size={14} fill={starred ? 'currentColor' : 'none'} />
+                        <Star size={13} fill={starred ? 'currentColor' : 'none'} />
                       </button>
-                      <span className="truncate flex-1">{c.title}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-1">
+                          <p className="text-[13px] font-medium text-[#1A1A1A] truncate">
+                            {c.title}
+                          </p>
+                          <span className="text-[10px] text-[#ACACAC] shrink-0 mt-0.5">
+                            {formatConvTime(c.created_at)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#8C8C8C] truncate">
+                          {c.title}
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation()
                           void onDeleteConversation(c.id)
                         }}
-                        className="hidden group-hover:flex text-gray-400 hover:text-red-500 shrink-0"
+                        className="hidden group-hover:flex text-[#ACACAC] hover:text-red-500 shrink-0 mt-0.5"
+                        aria-label="Delete conversation"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -320,14 +389,14 @@ export default function ExpandedWidget({
                   )
                 })}
               </nav>
-              <div className="p-2 border-t border-gray-200">
+              <div className="p-2 border-t border-[#F0F0F0]">
                 <button
                   type="button"
                   onClick={() => {
                     void onRefreshConversations()
                     setView('dashboard')
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium"
+                  className="w-full flex items-center justify-center gap-2 py-2 text-sm text-[#D97706] hover:bg-[#FFFBF0] rounded-lg font-medium transition-colors"
                 >
                   <LayoutList size={16} />
                   View All Conversations
@@ -352,15 +421,15 @@ export default function ExpandedWidget({
             bottomRef={bottomRef}
           />
 
-          <aside className="w-1/4 min-w-[200px] max-w-[320px] bg-gray-50 flex flex-col border-l border-gray-200">
-            <div className="px-3 py-2 border-b border-gray-200 flex items-center gap-2">
+          <aside className="w-1/4 min-w-[200px] max-w-[320px] bg-[#FAFAFA] flex flex-col border-l border-[#F0F0F0]">
+            <div className="px-3 py-2 border-b border-[#F0F0F0] flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setRightTab('files')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   rightTab === 'files'
-                    ? 'bg-white border border-gray-200 text-gray-800'
-                    : 'text-gray-500 hover:text-gray-800'
+                    ? 'bg-white border border-[#F0F0F0] text-[#1A1A1A] shadow-sm'
+                    : 'text-[#8C8C8C] hover:text-[#1A1A1A]'
                 }`}
               >
                 Files
@@ -368,10 +437,10 @@ export default function ExpandedWidget({
               <button
                 type="button"
                 onClick={() => setRightTab('generate')}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   rightTab === 'generate'
-                    ? 'bg-white border border-gray-200 text-gray-800'
-                    : 'text-gray-500 hover:text-gray-800'
+                    ? 'bg-white border border-[#F0F0F0] text-[#1A1A1A] shadow-sm'
+                    : 'text-[#8C8C8C] hover:text-[#1A1A1A]'
                 }`}
               >
                 Generate
@@ -380,54 +449,67 @@ export default function ExpandedWidget({
 
             {rightTab === 'files' ? (
               <>
-                <div className="px-4 py-3 border-b border-gray-200">
+                <div className="px-4 py-3 border-b border-[#F0F0F0]">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-gray-700">
+                    <p className="text-sm font-semibold text-[#1A1A1A]">
                       Uploaded Files ({files.length})
                     </p>
                     <button
                       type="button"
                       onClick={handleOpenFileUploadModal}
                       disabled={!conversation}
-                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40"
+                      className="text-xs font-semibold text-[#D97706] hover:text-[#B45309] disabled:opacity-40"
                     >
                       + Add More
                     </button>
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs text-[#8C8C8C] mt-0.5">
                     Used for document Q&amp;A
                   </p>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
                   {files.length === 0 && (
-                    <p className="text-xs text-gray-400 text-center mt-6">
+                    <p className="text-xs text-[#8C8C8C] text-center mt-6">
                       No files yet. Upload a PDF, DOCX, or TXT to chat with your
                       documents.
                     </p>
                   )}
-                  {files.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-2"
-                    >
-                      <FileText size={14} className="text-indigo-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-gray-700 truncate">
-                          {f.filename}
-                        </p>
-                        <p
-                          className={`text-xs ${
-                            f.status === 'processed'
-                              ? 'text-green-500'
-                              : 'text-amber-500'
-                          }`}
-                        >
-                          {f.status === 'processed' ? '✓ Ready' : '⏳ Processing'}
-                        </p>
+                  {files.map((f) => {
+                    const processed = f.status === 'processed'
+                    return (
+                      <div
+                        key={f.id}
+                        className="flex items-center gap-2.5 bg-white rounded-[8px] border border-[#F0F0F0] px-3 py-2.5 transition-shadow hover:shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
+                      >
+                        <FileText
+                          size={16}
+                          className="shrink-0"
+                          style={{ color: fileIconColor(f.filename) }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[#1A1A1A] truncate">
+                            {f.filename}
+                          </p>
+                          <p
+                            className={`flex items-center gap-1 text-[11px] ${
+                              processed ? 'text-[#22C55E]' : 'text-[#F59E0B]'
+                            }`}
+                          >
+                            {processed ? (
+                              <>
+                                <Check size={11} /> Ready
+                              </>
+                            ) : (
+                              <>
+                                <Loader2 size={11} className="animate-spin" /> Processing
+                              </>
+                            )}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </>
             ) : (

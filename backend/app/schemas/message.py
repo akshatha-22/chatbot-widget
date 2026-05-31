@@ -14,3 +14,6 @@ class MessageResponse(MessageBase):
     id: int
     conversation_id: int
     created_at: datetime
+    has_pdf: bool = False
+    pdf_content: Optional[str] = None
+    pdf_filename: Optional[str] = None

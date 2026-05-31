@@ -44,6 +44,9 @@ class Message(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(50), nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    has_pdf = Column(Boolean, default=False)
+    pdf_content = Column(Text, nullable=True)
+    pdf_filename = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="messages")

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { Maximize2, X, Paperclip, Pencil, Clipboard, Send } from 'lucide-react'
+import { Maximize2, Minus, X, Paperclip, Send, Mic, LogOut, Download } from 'lucide-react'
 import { streamMessage } from '../../api/chat'
 import type { Message, Conversation, UploadedFile } from '../../types'
+import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import FileUploadModal from './FileUploadModal'
 import AssistantMarkdown from './AssistantMarkdown'
+import RemiAvatar2D from './RemiAvatar2D'
 
 export type CompactWidgetProps = {
   conversation: Conversation | null
@@ -16,6 +18,15 @@ export type CompactWidgetProps = {
   onRefreshConversations: () => Promise<unknown>
   onExpand: () => void
   onClose: () => void
+  onLogout?: () => void
+}
+
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return ''
+  }
 }
 
 export default function CompactWidget({
@@ -26,6 +37,7 @@ export default function CompactWidget({
   onRefreshConversations,
   onExpand,
   onClose,
+  onLogout,
 }: CompactWidgetProps) {
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
@@ -76,9 +88,19 @@ export default function CompactWidget({
         },
         onDone: (msg) => {
           setIsTyping(false)
-          onMessagesChange((prev) =>
-            prev.map((m) => (m.id === assistantId ? msg : m)),
-          )
+          onMessagesChange((prev) => {
+            const existing = prev.find((m) => m.id === assistantId)
+            if (existing) {
+              return prev.map((m) => (m.id === assistantId ? msg : m))
+            }
+            return [...prev, msg]
+          })
+          if (msg.has_pdf && msg.pdf_content) {
+            void generatePDFFromContent(
+              msg.pdf_content,
+              msg.pdf_filename || 'remi-generated.pdf',
+            )
+          }
           void onRefreshConversations()
         },
       })
@@ -94,68 +116,126 @@ export default function CompactWidget({
     setFileUploadOpen(true)
   }
 
+  const hasText = input.trim().length > 0
+
   return (
-    <div className="fixed bottom-[88px] right-5 w-[350px] rounded-2xl border border-gray-200 bg-white shadow-xl flex flex-col overflow-hidden z-50">
-      <div className="bg-indigo-500 h-12 flex items-center justify-between px-4 shrink-0">
-        <span className="text-white font-semibold text-sm">Remi</span>
-        <div className="flex gap-2">
+    <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] flex flex-col overflow-hidden z-50 animate-widgetIn origin-bottom-right">
+      {/* Header */}
+      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA]">
+        <div className="flex items-center gap-2.5">
+          <RemiAvatar2D size={28} className="shrink-0" />
+          <div className="leading-tight">
+            <p className="text-sm font-semibold text-[#1A1A1A]">Remi</p>
+            <p className="flex items-center gap-1 text-[11px] text-[#8C8C8C]">
+              <span className="h-2 w-2 rounded-full bg-[#22C55E]" />
+              Online
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+              aria-label="Sign out"
+            >
+              <LogOut size={16} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onExpand}
-            className="text-white/80 hover:text-white"
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Expand"
           >
             <Maximize2 size={16} />
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="text-white/80 hover:text-white"
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Minimize"
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            aria-label="Close"
           >
             <X size={16} />
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[260px] max-h-[280px]">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-5 py-5 min-h-[260px] max-h-[300px] bg-white">
         {messages.length === 0 && (
-          <div className="flex gap-2 items-end">
-            <div className="w-6 h-6 rounded-full bg-yellow-400 shrink-0" />
-            <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm text-gray-800">
+          <div className="bubble-enter flex gap-2 items-end">
+            <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />
+            <div className="bg-[#F5F5F5] rounded-[18px] px-3.5 py-2.5 text-sm text-[#1A1A1A]">
               Hi! I&apos;m Remi. How can I help you today?
             </div>
           </div>
         )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex gap-2 items-end ${m.role === 'user' ? 'flex-row-reverse' : ''}`}
-          >
-            {m.role === 'assistant' && (
-              <div className="w-6 h-6 rounded-full bg-yellow-400 shrink-0" />
-            )}
+        {messages.map((m, i) => {
+          const isUser = m.role === 'user'
+          const prev = messages[i - 1]
+          const sameSender = prev && prev.role === m.role
+          return (
             <div
-              className={`px-3 py-2 rounded-2xl text-sm max-w-[80%] ${
-                m.role === 'user'
-                  ? 'bg-indigo-500 text-white rounded-br-sm'
-                  : 'bg-gray-100 text-gray-800 rounded-bl-sm'
-              }`}
+              key={m.id}
+              className={`bubble-enter group flex gap-2 items-end ${
+                isUser ? 'flex-row-reverse' : ''
+              } ${sameSender ? 'mt-1' : 'mt-3'}`}
             >
-              {m.role === 'assistant' ? (
-                <AssistantMarkdown content={m.content} />
-              ) : (
-                m.content
-              )}
-            </div>
-          </div>
-        ))}
-        {isTyping && (
-          <div className="flex gap-2 items-end">
-            <div className="w-6 h-6 rounded-full bg-yellow-400 shrink-0" />
-            <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3 flex gap-1">
-              {[0, 1, 2].map((i) => (
+              {!isUser && <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />}
+              <div className="flex flex-col max-w-[80%]">
                 <div
+                  className={`px-3.5 py-2.5 rounded-[18px] text-sm leading-relaxed ${
+                    isUser
+                      ? 'bg-[#1A1A1A] text-white'
+                      : 'bg-[#F5F5F5] text-[#1A1A1A]'
+                  }`}
+                >
+                  {isUser ? m.content : <AssistantMarkdown content={m.content} />}
+                  {!isUser && m.has_pdf && m.pdf_content && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void generatePDFFromContent(
+                          m.pdf_content!,
+                          m.pdf_filename || 'remi-generated.pdf',
+                        )
+                      }
+                      className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 hover:text-amber-700 font-medium underline-offset-2 hover:underline"
+                    >
+                      <Download size={12} />
+                      Download PDF again
+                    </button>
+                  )}
+                </div>
+                <span
+                  className={`mt-1 text-[10px] text-[#ACACAC] opacity-0 group-hover:opacity-100 transition-opacity ${
+                    isUser ? 'text-right' : ''
+                  }`}
+                >
+                  {formatTime(m.created_at)}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+        {isTyping && (
+          <div className="bubble-enter flex gap-2 items-end mt-3">
+            <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />
+            <div className="bg-[#F5F5F5] rounded-[18px] px-4 py-3 flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span
                   key={i}
-                  className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"
+                  className="w-1.5 h-1.5 rounded-full bg-[#8C8C8C] animate-dotWave"
                   style={{ animationDelay: `${i * 0.15}s` }}
                 />
               ))}
@@ -165,50 +245,51 @@ export default function CompactWidget({
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-gray-100 bg-gray-50 px-3 py-2 flex items-center gap-2">
-        <div className="flex gap-1">
+      {/* Input */}
+      <div className="shrink-0 border-t border-[#F0F0F0] bg-white px-4 py-3">
+        <div className="flex items-end gap-2">
           <button
             type="button"
             onClick={handleOpenFileUpload}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-500 hover:bg-indigo-50"
-            aria-label="Upload files"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-[#ACACAC] hover:text-[#F59E0B] transition-colors shrink-0"
+            aria-label="Attach file"
           >
-            <Paperclip size={14} />
+            <Paperclip size={18} />
           </button>
-          <button
-            type="button"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-500 hover:bg-indigo-50"
-          >
-            <Pencil size={14} />
-          </button>
-          <button
-            type="button"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-500 hover:bg-indigo-50"
-          >
-            <Clipboard size={14} />
-          </button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
+            placeholder="Ask Remi anything..."
+            rows={1}
+            className="flex-1 resize-none rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2 text-sm text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 min-h-[38px] max-h-28"
+          />
+          {hasText ? (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={isTyping}
+              className="w-9 h-9 rounded-full bg-[#F59E0B] text-white flex items-center justify-center hover:bg-[#D97706] active:scale-95 transition-all disabled:opacity-50 shrink-0"
+              aria-label="Send message"
+            >
+              <Send size={16} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[#ACACAC] shrink-0"
+              aria-label="Voice input"
+              disabled
+            >
+              <Mic size={18} />
+            </button>
+          )}
         </div>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              handleSend()
-            }
-          }}
-          placeholder="Type your message…"
-          rows={1}
-          className="flex-1 resize-none rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 h-[34px]"
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={isTyping}
-          className="w-[34px] h-[34px] rounded-lg bg-indigo-500 text-white flex items-center justify-center hover:bg-indigo-600 disabled:opacity-50 shrink-0"
-        >
-          <Send size={14} />
-        </button>
       </div>
 
       {fileUploadOpen && conversation && (

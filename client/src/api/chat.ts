@@ -13,6 +13,9 @@ export interface Message {
   content: string
   role: 'user' | 'assistant'
   created_at: string
+  has_pdf?: boolean
+  pdf_content?: string | null
+  pdf_filename?: string | null
 }
 
 // baseURL is already http://localhost:8000/api/v1
@@ -39,6 +42,9 @@ export async function getConversationMessages(
     ...m,
     id: String(m.id),
     role: m.role as Message['role'],
+    has_pdf: m.has_pdf ?? false,
+    pdf_content: m.pdf_content ?? null,
+    pdf_filename: m.pdf_filename ?? null,
   }))
 }
 
@@ -70,6 +76,9 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
       role?: string
       content?: string
       created_at?: string
+      has_pdf?: boolean
+      pdf_content?: string | null
+      pdf_filename?: string | null
     }
     if (parsed.event === 'done' && parsed.content != null) {
       return {
@@ -79,6 +88,9 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
           role: 'assistant',
           content: parsed.content,
           created_at: parsed.created_at ?? new Date().toISOString(),
+          has_pdf: parsed.has_pdf ?? false,
+          pdf_content: parsed.pdf_content ?? null,
+          pdf_filename: parsed.pdf_filename ?? null,
         },
       }
     }
@@ -189,11 +201,23 @@ export async function sendMessage(
     ...assistant,
     id: String(assistant.id),
     role: assistant.role as 'user' | 'assistant',
+    has_pdf: assistant.has_pdf ?? false,
+    pdf_content: assistant.pdf_content ?? null,
+    pdf_filename: assistant.pdf_filename ?? null,
   }
 }
 
 export async function deleteConversation(id: string): Promise<void> {
   await apiClient.delete(`/chat/conversations/${id}`)
+}
+
+export async function renameConversation(
+  id: string,
+  title: string,
+): Promise<Conversation> {
+  const response = await apiClient.patch(`/chat/conversations/${id}`, { title })
+  const data = response.data
+  return { ...data, id: String(data.id) }
 }
 
 export type GenerateConversationFileRequest = {
@@ -205,6 +229,7 @@ export type GenerateConversationFileResponse = {
   filename: string
   format: 'pdf' | 'docx' | 'txt'
   content: string
+  type: string
 }
 
 export async function generateConversationFile(
@@ -235,6 +260,9 @@ export async function getConversationDetail(
       ...m,
       id: String(m.id),
       role: m.role as Message['role'],
+      has_pdf: m.has_pdf ?? false,
+      pdf_content: m.pdf_content ?? null,
+      pdf_filename: m.pdf_filename ?? null,
     })),
   }
 }

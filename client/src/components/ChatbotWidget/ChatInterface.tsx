@@ -10,13 +10,17 @@ import {
   ThumbsDown,
   Paperclip,
   Send,
+  Mic,
   Check,
   X,
+  Download,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { Message, Conversation } from '../../types'
+import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import MessageEditModal from './MessageEditModal'
 import AssistantMarkdown from './AssistantMarkdown'
+import RemiAvatar2D from './RemiAvatar2D'
 
 const MAX_INPUT_LENGTH = 2000
 
@@ -29,6 +33,32 @@ function formatMessageTime(iso: string): string {
   } catch {
     return ''
   }
+}
+
+function dayKey(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toDateString()
+}
+
+function formatDateDivider(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function DateDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 my-3">
+      <div className="flex-1 h-px bg-[#F0F0F0]" />
+      <span className="text-[10px] text-[#ACACAC] font-medium">{label}</span>
+      <div className="flex-1 h-px bg-[#F0F0F0]" />
+    </div>
+  )
 }
 
 export interface ChatInterfaceProps {
@@ -182,13 +212,13 @@ export default function ChatInterface({
   const Wrapper = embedded ? 'div' : 'main'
   const wrapperClass = embedded
     ? 'flex-1 flex flex-col min-h-0 min-w-0 bg-white'
-    : 'flex-1 flex flex-col min-w-0 border-r border-gray-200 bg-white'
+    : 'flex-1 flex flex-col min-w-0 border-r border-[#F0F0F0] bg-white'
 
   return (<>
     <Wrapper className={wrapperClass}>
       {/* Conversation header */}
       {!embedded && (
-      <header className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+      <header className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[#F0F0F0]">
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           {isEditingTitle ? (
             <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -200,13 +230,13 @@ export default function ChatInterface({
                   if (e.key === 'Enter') commitRename()
                   if (e.key === 'Escape') cancelRename()
                 }}
-                className="flex-1 min-w-0 text-sm font-semibold text-gray-800 border border-indigo-300 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 min-w-0 text-sm font-semibold text-[#1A1A1A] border border-[#F59E0B]/40 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-[#F59E0B]/40"
                 maxLength={120}
               />
               <button
                 type="button"
                 onClick={commitRename}
-                className="p-1 rounded-md text-indigo-600 hover:bg-indigo-50"
+                className="p-1 rounded-md text-[#D97706] hover:bg-[#FFFBF0]"
                 aria-label="Save title"
               >
                 <Check size={16} />
@@ -214,7 +244,7 @@ export default function ChatInterface({
               <button
                 type="button"
                 onClick={cancelRename}
-                className="p-1 rounded-md text-gray-400 hover:bg-gray-100"
+                className="p-1 rounded-md text-[#8C8C8C] hover:bg-[#F5F5F5]"
                 aria-label="Cancel rename"
               >
                 <X size={16} />
@@ -222,14 +252,14 @@ export default function ChatInterface({
             </div>
           ) : (
             <>
-              <h2 className="text-sm font-semibold text-gray-800 truncate">
+              <h2 className="text-sm font-semibold text-[#1A1A1A] truncate">
                 {conversation?.title ?? 'New Chat'}
               </h2>
               <button
                 type="button"
                 onClick={startRename}
                 disabled={!conversation}
-                className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 shrink-0"
+                className="p-1 rounded-md text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0] disabled:opacity-40 shrink-0"
                 aria-label="Rename conversation"
               >
                 <Pencil size={14} />
@@ -244,8 +274,8 @@ export default function ChatInterface({
             onClick={handleSearchToggle}
             className={`p-2 rounded-lg transition-colors ${
               chatSearchOpen || messageFilter
-                ? 'text-indigo-600 bg-indigo-50'
-                : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
+                ? 'text-[#D97706] bg-[#FFFBF0]'
+                : 'text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0]'
             }`}
             aria-label="Search in conversation"
           >
@@ -255,7 +285,7 @@ export default function ChatInterface({
             type="button"
             onClick={handleShare}
             disabled={!conversation}
-            className="p-2 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 disabled:opacity-40"
+            className="p-2 rounded-lg text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0] disabled:opacity-40"
             aria-label="Share conversation"
           >
             <Share2 size={16} />
@@ -264,7 +294,7 @@ export default function ChatInterface({
             type="button"
             onClick={onDeleteConversation}
             disabled={!conversation}
-            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 disabled:opacity-40"
+            className="p-2 rounded-lg text-[#8C8C8C] hover:text-red-500 hover:bg-red-50 disabled:opacity-40"
             aria-label="Delete conversation"
           >
             <Trash2 size={16} />
@@ -274,7 +304,7 @@ export default function ChatInterface({
             <DropdownMenu.Trigger asChild>
               <button
                 type="button"
-                className="p-2 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                className="p-2 rounded-lg text-[#8C8C8C] hover:text-[#1A1A1A] hover:bg-[#F5F5F5]"
                 aria-label="More options"
               >
                 <MoreVertical size={16} />
@@ -317,18 +347,18 @@ export default function ChatInterface({
 
       {/* In-chat search bar */}
       {!embedded && chatSearchOpen && (
-        <div className="shrink-0 px-4 py-2 border-b border-gray-100 bg-gray-50 flex gap-2">
+        <div className="shrink-0 px-4 py-2 border-b border-[#F0F0F0] bg-[#FAFAFA] flex gap-2">
           <input
             value={chatSearchQuery}
             onChange={(e) => setChatSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && applyChatSearch()}
             placeholder="Search messages…"
-            className="flex-1 text-sm rounded-lg border border-gray-200 px-3 py-1.5 outline-none focus:border-indigo-400"
+            className="flex-1 text-sm rounded-lg border border-[#F0F0F0] px-3 py-1.5 outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
           />
           <button
             type="button"
             onClick={applyChatSearch}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-indigo-500 rounded-lg hover:bg-indigo-600"
+            className="px-3 py-1.5 text-sm font-medium text-white bg-[#F59E0B] rounded-lg hover:bg-[#D97706]"
           >
             Find
           </button>
@@ -339,7 +369,7 @@ export default function ChatInterface({
               setChatSearchQuery('')
               setMessageFilter('')
             }}
-            className="p-1.5 text-gray-400 hover:text-gray-600"
+            className="p-1.5 text-[#8C8C8C] hover:text-[#1A1A1A]"
             aria-label="Close search"
           >
             <X size={18} />
@@ -348,7 +378,7 @@ export default function ChatInterface({
       )}
 
       {!embedded && messageFilter && (
-        <p className="shrink-0 px-4 py-1.5 text-xs text-indigo-600 bg-indigo-50 border-b border-indigo-100">
+        <p className="shrink-0 px-4 py-1.5 text-xs text-[#D97706] bg-[#FFFBF0] border-b border-[#F0F0F0]">
           Showing messages matching &ldquo;{messageFilter}&rdquo;
           <button
             type="button"
@@ -361,140 +391,153 @@ export default function ChatInterface({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto px-5 py-5 bg-white">
         {showWelcome && filteredMessages.length === 0 && !messageFilter && (
-          <div className="flex flex-col gap-1 max-w-[85%]">
+          <div className="bubble-enter group flex flex-col max-w-[85%]">
             <div className="flex gap-2 items-end">
-              <div className="w-7 h-7 rounded-full bg-yellow-400 shrink-0" />
-              <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm text-gray-800">
+              <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />
+              <div className="bg-[#F5F5F5] rounded-[18px] px-3.5 py-2.5 text-sm text-[#1A1A1A]">
                 Hi! I&apos;m Remi. How can I help you today?
               </div>
             </div>
-            <span className="text-[11px] text-gray-400 ml-9">
-              {formatMessageTime(new Date().toISOString())}
-            </span>
           </div>
         )}
 
-        {filteredMessages.map((m) => {
+        {filteredMessages.map((m, idx) => {
           const isUser = m.role === 'user'
           const fb = feedback[m.id]
+          const prev = filteredMessages[idx - 1]
+          const sameSender = prev && prev.role === m.role
+          const showDivider =
+            !prev || dayKey(prev.created_at) !== dayKey(m.created_at)
 
           return (
-            <div
-              key={m.id}
-              className={`message-row flex flex-col gap-0.5 max-w-[85%] ${
-                isUser
-                  ? 'ml-auto items-end'
-                  : 'items-start'
-              } group`}
-            >
+            <div key={m.id}>
+              {showDivider && <DateDivider label={formatDateDivider(m.created_at)} />}
               <div
-                className={`flex gap-2 items-end w-full ${
-                  isUser ? 'flex-row-reverse' : ''
-                }`}
+                className={`message-row flex flex-col max-w-[85%] ${
+                  isUser ? 'ml-auto items-end' : 'items-start'
+                } ${sameSender && !showDivider ? 'mt-1' : 'mt-3'} group`}
               >
-                {!isUser && (
-                  <div className="w-7 h-7 rounded-full bg-yellow-400 shrink-0" />
-                )}
                 <div
-                  className={`px-3 py-2 rounded-2xl text-sm ${
-                    isUser
-                      ? 'bg-indigo-500 text-white rounded-br-sm'
-                      : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                  className={`bubble-enter flex gap-2 items-end w-full ${
+                    isUser ? 'flex-row-reverse' : ''
                   }`}
                 >
-                  {isUser ? (
-                    m.content
-                  ) : (
-                    <AssistantMarkdown content={m.content} />
-                  )}
-                </div>
-              </div>
-
-              <span
-                className={`text-[11px] text-gray-400 tabular-nums ${
-                  isUser ? '' : 'ml-9'
-                }`}
-              >
-                {formatMessageTime(m.created_at)}
-              </span>
-
-              {isUser && (
-                <div className="self-end opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    onClick={() => openEditForMessage(m)}
-                    className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                    aria-label="Edit message"
+                  {!isUser && <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />}
+                  <div
+                    className={`px-3.5 py-2.5 rounded-[18px] text-sm leading-relaxed ${
+                      isUser
+                        ? 'bg-[#1A1A1A] text-white'
+                        : 'bg-[#F5F5F5] text-[#1A1A1A]'
+                    }`}
                   >
-                    <Pencil size={14} />
-                  </button>
-                </div>
-              )}
-
-              {!isUser && (
-                <div className="ml-9 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(m)}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                    aria-label="Copy message"
-                  >
-                    {copiedId === m.id ? (
-                      <Check size={14} className="text-green-600" />
-                    ) : (
-                      <Copy size={14} />
+                    {isUser ? m.content : <AssistantMarkdown content={m.content} />}
+                    {!isUser && m.has_pdf && m.pdf_content && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void generatePDFFromContent(
+                            m.pdf_content!,
+                            m.pdf_filename || 'remi-generated.pdf',
+                          )
+                        }
+                        className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 hover:text-amber-700 font-medium underline-offset-2 hover:underline"
+                      >
+                        <Download size={12} />
+                        Download PDF again
+                      </button>
                     )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFeedback((prev) => ({ ...prev, [m.id]: 'up' }))
-                    }
-                    className={`p-1.5 rounded-md hover:bg-gray-100 ${
-                      fb === 'up'
-                        ? 'text-indigo-600 bg-indigo-50'
-                        : 'text-gray-400 hover:text-gray-700'
-                    }`}
-                    aria-label="Helpful"
-                  >
-                    <ThumbsUp size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFeedback((prev) => ({ ...prev, [m.id]: 'down' }))
-                    }
-                    className={`p-1.5 rounded-md hover:bg-gray-100 ${
-                      fb === 'down'
-                        ? 'text-red-500 bg-red-50'
-                        : 'text-gray-400 hover:text-gray-700'
-                    }`}
-                    aria-label="Not helpful"
-                  >
-                    <ThumbsDown size={14} />
-                  </button>
+                  </div>
                 </div>
-              )}
+
+                <span
+                  className={`mt-1 text-[10px] text-[#ACACAC] tabular-nums opacity-0 group-hover:opacity-100 transition-opacity ${
+                    isUser ? '' : 'ml-8'
+                  }`}
+                >
+                  {formatMessageTime(m.created_at)}
+                </span>
+
+                {isUser && (
+                  <div className="self-end opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => openEditForMessage(m)}
+                      className="p-1 rounded-md text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0]"
+                      aria-label="Edit message"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                )}
+
+                {!isUser && (
+                  <div className="ml-8 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(m)}
+                      className="p-1.5 rounded-md text-[#8C8C8C] hover:text-[#1A1A1A] hover:bg-[#F5F5F5]"
+                      aria-label="Copy message"
+                    >
+                      {copiedId === m.id ? (
+                        <Check size={14} className="text-[#22C55E]" />
+                      ) : (
+                        <Copy size={14} />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFeedback((prev) => ({ ...prev, [m.id]: 'up' }))
+                      }
+                      className={`p-1.5 rounded-md hover:bg-[#F5F5F5] ${
+                        fb === 'up'
+                          ? 'text-[#D97706] bg-[#FFFBF0]'
+                          : 'text-[#8C8C8C] hover:text-[#1A1A1A]'
+                      }`}
+                      aria-label="Helpful"
+                    >
+                      <ThumbsUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFeedback((prev) => ({ ...prev, [m.id]: 'down' }))
+                      }
+                      className={`p-1.5 rounded-md hover:bg-[#F5F5F5] ${
+                        fb === 'down'
+                          ? 'text-red-500 bg-red-50'
+                          : 'text-[#8C8C8C] hover:text-[#1A1A1A]'
+                      }`}
+                      aria-label="Not helpful"
+                    >
+                      <ThumbsDown size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )
         })}
 
         {isTyping && (
-          <div className="flex flex-col gap-1 max-w-[85%]">
+          <div className="bubble-enter flex flex-col max-w-[85%] mt-3">
             <div className="flex gap-2 items-end">
-              <div className="w-7 h-7 rounded-full bg-yellow-400 shrink-0" />
-              <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3 flex gap-1">
+              <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />
+              <div className="bg-[#F5F5F5] rounded-[18px] px-4 py-3 flex gap-1">
                 {[0, 1, 2].map((i) => (
-                  <div
+                  <span
                     key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"
+                    className="w-1.5 h-1.5 rounded-full bg-[#8C8C8C] animate-dotWave"
                     style={{ animationDelay: `${i * 0.15}s` }}
                   />
                 ))}
               </div>
             </div>
+            <span className="ml-8 mt-1 text-[11px] text-[#8C8C8C]">
+              Remi is typing...
+            </span>
           </div>
         )}
 
@@ -502,26 +545,26 @@ export default function ChatInterface({
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t border-gray-100 bg-gray-50 px-4 py-3">
+      <div className="shrink-0 border-t border-[#F0F0F0] bg-white px-4 py-3">
         <div className="flex items-end gap-2">
           {onOpenFileUploadModal ? (
             <button
               type="button"
               onClick={onOpenFileUploadModal}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 shrink-0"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-[#ACACAC] hover:text-[#F59E0B] transition-colors shrink-0"
               aria-label="Attach file"
             >
-              <Paperclip size={15} />
+              <Paperclip size={18} />
             </button>
           ) : fileInputRef && onFileChange ? (
             <>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 shrink-0"
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-[#ACACAC] hover:text-[#F59E0B] transition-colors shrink-0"
                 aria-label="Attach file"
               >
-                <Paperclip size={15} />
+                <Paperclip size={18} />
               </button>
               <input
                 type="file"
@@ -541,26 +584,35 @@ export default function ChatInterface({
                 if (canSend) onSend()
               }
             }}
-            placeholder="Type your message…"
+            placeholder="Ask Remi anything..."
             rows={1}
             disabled={!conversation}
-            className="flex-1 resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 min-h-[38px] max-h-32 disabled:opacity-50"
+            className="flex-1 resize-none rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2 text-sm text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 min-h-[38px] max-h-32 disabled:opacity-50"
           />
-          <button
-            type="button"
-            onClick={onSend}
-            disabled={!canSend}
-            className="w-[38px] h-[38px] rounded-lg bg-indigo-500 text-white flex items-center justify-center hover:bg-indigo-600 disabled:opacity-50 shrink-0"
-            aria-label="Send message"
-          >
-            <Send size={15} />
-          </button>
+          {input.trim().length > 0 ? (
+            <button
+              type="button"
+              onClick={onSend}
+              disabled={!canSend}
+              className="w-9 h-9 rounded-full bg-[#F59E0B] text-white flex items-center justify-center hover:bg-[#D97706] active:scale-95 transition-all disabled:opacity-50 shrink-0"
+              aria-label="Send message"
+            >
+              <Send size={16} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[#ACACAC] shrink-0"
+              aria-label="Voice input"
+              disabled
+            >
+              <Mic size={18} />
+            </button>
+          )}
         </div>
         <p
-          className={`mt-1.5 text-right text-xs tabular-nums ${
-            input.length >= MAX_INPUT_LENGTH
-              ? 'text-amber-600'
-              : 'text-gray-400'
+          className={`mt-1.5 text-right text-[10px] tabular-nums ${
+            input.length >= MAX_INPUT_LENGTH ? 'text-[#D97706]' : 'text-[#ACACAC]'
           }`}
         >
           {input.length}/{MAX_INPUT_LENGTH}

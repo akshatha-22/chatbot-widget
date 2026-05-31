@@ -6,6 +6,7 @@ from app.config import settings
 from app.services import vector_store_service
 from datetime import datetime
 import json
+import re
 
 MARKDOWN_INSTRUCTION = (
     "Always format your responses using markdown. Use bullet points for lists, "
@@ -98,9 +99,161 @@ def format_sse_done(assistant_message: Message) -> str:
             "created_at": assistant_message.created_at.isoformat()
             if assistant_message.created_at
             else None,
+            "has_pdf": bool(getattr(assistant_message, "has_pdf", False)),
+            "pdf_content": getattr(assistant_message, "pdf_content", None),
+            "pdf_filename": getattr(assistant_message, "pdf_filename", None),
         }
     )
     return f"data: {payload}\n\n"
+
+
+def _is_contextual_pdf_topic(topic: str) -> bool:
+    """Topics that should pull content from the current conversation."""
+    t = topic.lower().strip().rstrip("?.!")
+    if t in {"content", "this", "that", "it", "above", "below"}:
+        return True
+    return bool(re.match(r"^(the|this|that|our|my)\s+", t))
+
+
+def detect_pdf_request(message: str) -> Optional[str]:
+    """Returns the content topic if message is a PDF request, else None."""
+    msg_lower = message.lower().strip().rstrip("?.!")
+    if not re.search(r"\bpdf\b", msg_lower):
+        return None
+
+    prefix = r"(?:(?:can|could|will|would)\s+you|please|kindly)\s+"
+    article = r"(?:the|a|an)?\s*"
+    verb = r"(?:generate|create|make|produce|build|get|give|export|download|turn|save|provide|send)"
+    prep = r"(?:with|of|about|for|on|containing|from)"
+
+    patterns: list[tuple[str, bool]] = [
+        # "can you generate the pdf with the recipe"
+        (rf"(?:{prefix})?{verb}\s+(?:me\s+)?(?:{article})?pdf\s+{prep}\s+(.+)", True),
+        # "generate a pdf recipe" / "make pdf of X"
+        (rf"(?:{prefix})?{verb}\s+(?:me\s+)?(?:{article})?pdf\s+(?:file\s+)?(?:{prep}\s+)?(.+)", True),
+        # "turn this into a pdf"
+        (r"turn\s+(?:this|that|it|the conversation)\s+into\s+(?:a|the)?\s*pdf", False),
+        # "export/download this as pdf"
+        (r"(?:export|save|download)\s+(?:this|that|it|the conversation)?\s*(?:chat|conversation)?\s*(?:as|to)\s+(?:a|the)?\s*pdf", False),
+        # "generate the pdf" (no topic — use conversation)
+        (rf"(?:{prefix})?{verb}\s+(?:me\s+)?(?:{article})?pdf\s*$", False),
+        # "I need a pdf of the recipe"
+        (rf"(?:i\s+(?:need|want)|get\s+me)\s+(?:a|the)?\s*pdf\s+{prep}\s+(.+)", True),
+    ]
+
+    for pattern, has_topic in patterns:
+        match = re.search(pattern, msg_lower)
+        if match:
+            if has_topic:
+                topic = match.group(1).strip().rstrip("?.!")
+                return topic or "content"
+            return "content"
+
+    # Broad fallback: pdf + action verb in the same message
+    if re.search(
+        r"\b(generate|create|make|export|download|turn|save|provide|build|give)\b",
+        msg_lower,
+    ):
+        topic_match = re.search(rf"\b{prep}\s+(.+)$", msg_lower)
+        if topic_match:
+            return topic_match.group(1).strip().rstrip("?.!") or "content"
+        return "content"
+
+    return None
+
+
+def _build_pdf_topic_prompt(pdf_topic: str, conversation_text: str = "") -> str:
+    """Prompt LLM for structured markdown suitable for PDF export."""
+    use_conversation = (
+        pdf_topic == "content" or _is_contextual_pdf_topic(pdf_topic)
+    ) and conversation_text.strip()
+
+    if use_conversation:
+        focus = ""
+        if pdf_topic not in {"content"} and not pdf_topic.startswith("content"):
+            focus = f" Focus on: {pdf_topic}."
+        subject_block = (
+            "Using the conversation below, create a well-structured PDF-ready document."
+            f"{focus}\n"
+            "Extract and organize the relevant information from the chat.\n"
+            "Do NOT say you cannot create files — output the document content only.\n\n"
+            f"{conversation_text}\n"
+        )
+    elif pdf_topic == "content":
+        subject_block = "Create a helpful structured document based on the user's request.\n"
+    else:
+        subject_block = f"Create well-structured content about: {pdf_topic}\n"
+
+    return f"""{subject_block}
+Format your response with:
+## Title (topic name)
+
+A brief intro paragraph
+
+## Ingredients / Key Points / Overview
+- bullet point 1
+- bullet point 2
+- bullet point 3
+
+## Steps / Details / Method
+1. numbered step 1
+2. numbered step 2
+
+## Notes / Tips
+- any extra tips
+
+## Summary
+closing paragraph
+
+Use proper markdown formatting throughout.
+"""
+
+
+def _conversation_text_for_pdf(conv: Conversation, limit: int = 30) -> str:
+    msgs = sorted(conv.messages, key=lambda m: m.created_at)[-limit:]
+    return "\n".join(f"{m.role}: {m.content}" for m in msgs)
+
+
+def _safe_pdf_filename(pdf_topic: str) -> str:
+    safe = re.sub(r"[^\w\-_]+", "_", pdf_topic.strip())[:30].strip("_")
+    return f"{safe or 'remi_generated'}.pdf"
+
+
+def _create_pdf_assistant_message(
+    db: Session,
+    conversation_id: int,
+    user_id: int,
+    pdf_topic: str,
+) -> Message:
+    """Generate PDF markdown via LLM and persist assistant message with PDF metadata."""
+    conv = get_conversation(db, conversation_id, user_id)
+    conversation_text = _conversation_text_for_pdf(conv)
+    prompt = _build_pdf_topic_prompt(pdf_topic, conversation_text)
+    generated_content = generate_text(prompt)
+
+    if not generated_content:
+        title = pdf_topic if pdf_topic != "content" else "Document"
+        generated_content = (
+            f"## {title.title()}\n\n"
+            "_Content could not be generated. Please configure GEMINI_API_KEY or OPENAI_API_KEY._"
+        )
+
+    filename = _safe_pdf_filename(pdf_topic if pdf_topic != "content" else "conversation")
+    display_topic = pdf_topic if pdf_topic != "content" else "your request"
+    assistant_content = (
+        f"I've generated the PDF for **{display_topic}**! It should download automatically. ✅"
+    )
+
+    return create_message(
+        db,
+        conversation_id,
+        user_id,
+        "assistant",
+        assistant_content,
+        has_pdf=True,
+        pdf_content=generated_content,
+        pdf_filename=filename,
+    )
 
 
 def _prepare_assistant_context(
@@ -109,7 +262,10 @@ def _prepare_assistant_context(
     """Shared setup: auto-title, history, RAG, Gemini prompt. Returns gemini_error hint."""
     conv = get_conversation(db, conversation_id, user_id)
 
-    if not conv.title or conv.title in ("New Conversation", "Conversation"):
+    _DEFAULT_TITLES = ("New Conversation", "New Chat", "Conversation")
+    if conv.title and conv.title not in _DEFAULT_TITLES:
+        pass  # user renamed — never overwrite a custom title
+    elif not conv.title or conv.title in _DEFAULT_TITLES:
         conv.title = user_message[:40] + ("..." if len(user_message) > 40 else "")
         db.add(conv)
         db.commit()
@@ -240,6 +396,14 @@ def stream_and_save_assistant(
     db: Session, conversation_id: int, user_id: int, user_message: str
 ) -> Iterator[str]:
     """Yield SSE-formatted chunks, then a final done event after persisting the assistant message."""
+    pdf_topic = detect_pdf_request(user_message)
+    if pdf_topic is not None:
+        assistant_msg = _create_pdf_assistant_message(
+            db, conversation_id, user_id, pdf_topic
+        )
+        yield format_sse_done(assistant_msg)
+        return
+
     parts: List[str] = []
     for piece in iter_assistant_chunks(db, conversation_id, user_id, user_message):
         parts.append(piece)
@@ -301,6 +465,17 @@ def list_conversations(db: Session, user_id: int) -> List[Conversation]:
     ).order_by(Conversation.created_at.desc()).all()
 
 
+def rename_conversation(
+    db: Session, conversation_id: int, user_id: int, title: str
+) -> Conversation:
+    """Persist a user-edited conversation title."""
+    conv = get_conversation(db, conversation_id, user_id)
+    conv.title = title.strip() or conv.title
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
 def delete_conversation(db: Session, conversation_id: int, user_id: int) -> bool:
     """Delete a conversation, verifying user ownership."""
     conv = get_conversation(db, conversation_id, user_id)
@@ -309,14 +484,26 @@ def delete_conversation(db: Session, conversation_id: int, user_id: int) -> bool
     return True
 
 
-def create_message(db: Session, conversation_id: int, user_id: int, role: str, content: str) -> Message:
+def create_message(
+    db: Session,
+    conversation_id: int,
+    user_id: int,
+    role: str,
+    content: str,
+    has_pdf: bool = False,
+    pdf_content: Optional[str] = None,
+    pdf_filename: Optional[str] = None,
+) -> Message:
     """Create a new message in a conversation after verifying user ownership."""
     get_conversation(db, conversation_id, user_id)
 
     db_msg = Message(
         conversation_id=conversation_id,
         role=role,
-        content=content
+        content=content,
+        has_pdf=has_pdf,
+        pdf_content=pdf_content,
+        pdf_filename=pdf_filename,
     )
     db.add(db_msg)
     db.commit()
@@ -352,6 +539,10 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
 
 def generate_assistant_response(db: Session, conversation_id: int, user_id: int, user_message: str) -> Message:
     """Generate assistant response using Gemini, OpenAI, or a smart local fallback."""
+    pdf_topic = detect_pdf_request(user_message)
+    if pdf_topic is not None:
+        return _create_pdf_assistant_message(db, conversation_id, user_id, pdf_topic)
+
     _conv, gemini_prompt, rag_context, history, _ = _prepare_assistant_context(
         db, conversation_id, user_id, user_message
     )
@@ -375,6 +566,82 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     return create_message(db, conversation_id, user_id, "assistant", assistant_content)
 
 
+def generate_text(prompt: str) -> str:
+    """Generate text from a one-shot prompt via Gemini, with OpenAI fallback."""
+    content = ""
+    if settings.GEMINI_API_KEY:
+        content, _ = _call_gemini(prompt)
+        content = (content or "").strip()
+
+    if not content and settings.OPENAI_API_KEY:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are Remi, a helpful writing assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=2000,
+            )
+            content = (response.choices[0].message.content or "").strip()
+        except Exception as e:
+            print(f"OpenAI generate_text error: {e}")
+
+    return content
+
+
+def _build_document_prompt(kind: str, conversation_text: str) -> str:
+    """Return a type-specific prompt that asks for structured markdown output."""
+    prompts = {
+        "summary": f"""
+Analyze this conversation and create a structured summary with:
+- An executive summary paragraph
+- Key Points (bullet list)
+- Main Topics Discussed (bullet list)
+- Action Items if any (bullet list)
+- Conclusion paragraph
+
+Format using markdown with ## headings and - bullet points.
+Do NOT paste the raw conversation transcript — synthesize and summarize only.
+
+Conversation:
+{conversation_text}
+""",
+        "report": f"""
+Create a formal report from this conversation with these sections:
+## Overview
+## Findings
+## Key Insights (bullet points)
+## Recommendations (numbered list)
+## Conclusion
+
+Format using markdown with ## headings, - bullets, and numbered lists.
+Do NOT paste the raw conversation transcript — write a polished report.
+
+Conversation:
+{conversation_text}
+""",
+        "analysis": f"""
+Perform a detailed analysis of this conversation with:
+## Analysis Summary
+## Sentiment & Tone
+## Key Themes (bullet points)
+## Notable Patterns
+## Conclusions
+
+Format using markdown with ## headings and - bullet points.
+Do NOT paste the raw conversation transcript — provide analytical insight only.
+
+Conversation:
+{conversation_text}
+""",
+    }
+    return prompts.get(kind, prompts["summary"])
+
+
 def generate_conversation_file(
     db: Session,
     conversation_id: int,
@@ -395,58 +662,31 @@ def generate_conversation_file(
     if fmt_norm not in {"pdf", "docx", "txt"}:
         fmt_norm = "txt"
 
-    # Build a plain transcript (latest 50 messages) as context.
-    msgs = conv.messages[-50:]
-    transcript_lines: List[str] = []
-    for m in msgs:
-        speaker = "User" if m.role == "user" else "Assistant"
-        transcript_lines.append(f"{speaker}: {m.content}")
+    msgs = sorted(conv.messages, key=lambda m: m.created_at)[-50:]
+    conversation_text = "\n".join(f"{m.role}: {m.content}" for m in msgs)
 
-    transcript = "\n\n".join(transcript_lines).strip()
+    if not conversation_text.strip():
+        conversation_text = "(No messages in this conversation yet.)"
 
-    prompt = (
-        f"You are a helpful assistant named Remi.\n\n"
-        f"Task: Write a {kind_norm} of this conversation.\n"
-        f"- Keep it structured with headings and bullet points when appropriate.\n"
-        f"- Do not include private tokens.\n\n"
-        f"Conversation:\n{transcript}\n\n"
-        f"Output:"
-    )
+    prompt = _build_document_prompt(kind_norm, conversation_text)
+    content = generate_text(prompt)
 
-    content = ""
-    if settings.GEMINI_API_KEY:
-        content, _ = _call_gemini(prompt)
-        content = (content or "").strip()
-
-    if not content and settings.OPENAI_API_KEY:
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            response = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are Remi."},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=900,
-            )
-            content = response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"OpenAI generate file error: {e}")
+    type_labels = {"summary": "Summary", "report": "Report", "analysis": "Analysis"}
+    doc_type = type_labels[kind_norm]
 
     if not content:
-        # Fallback: basic structured output
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
         content = (
-            f"{conv.title}\n"
-            f"Generated: {now}\n"
-            f"Type: {kind_norm}\n\n"
-            f"(AI generation unavailable — showing transcript.)\n\n"
-            f"{transcript}"
+            f"## {doc_type}\n\n"
+            "_AI generation is unavailable. Please configure GEMINI_API_KEY or OPENAI_API_KEY "
+            "and try again._"
         )
 
     safe_title = (conv.title or "conversation").strip().replace("/", "-").replace("\\", "-")
-    ext = fmt_norm
-    filename = f"{safe_title}-{kind_norm}.{ext}"
+    filename = f"{safe_title}-{kind_norm}.{fmt_norm}"
 
-    return {"filename": filename, "format": fmt_norm, "content": content}
+    return {
+        "filename": filename,
+        "format": fmt_norm,
+        "content": content,
+        "type": doc_type,
+    }

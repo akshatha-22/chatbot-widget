@@ -9,6 +9,9 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+  has_pdf?: boolean;
+  pdf_content?: string | null;
+  pdf_filename?: string | null;
 }
 
 export interface UploadedFile {

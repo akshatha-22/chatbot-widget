@@ -108,28 +108,83 @@ export function downloadConversationPdf(
   doc.save(filename)
 }
 
-/** Render arbitrary generated text (summary/report) into a PDF download. */
-export function downloadTextAsPdf(
-  title: string,
-  bodyText: string,
+/** Render AI-generated markdown (headings, bullets, lists) into a styled PDF. */
+export function downloadMarkdownAsPdf(
+  docType: string,
+  conversationTitle: string,
+  markdownContent: string,
   filename: string,
 ): void {
   const doc = new jsPDF()
-  doc.setFontSize(14)
-  doc.text(title, 20, 20)
-  doc.setFontSize(11)
-  const lines = doc.splitTextToSize(bodyText, 170)
-  let y = 32
-  const pageHeight = 280
-  const lineHeight = 6
 
-  for (const line of lines) {
-    if (y > pageHeight) {
+  doc.setFontSize(20)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(30, 30, 30)
+  doc.text(`${docType}: ${conversationTitle}`, 20, 25)
+
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(120, 120, 120)
+  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 35)
+
+  doc.setDrawColor(200, 200, 200)
+  doc.line(20, 40, 190, 40)
+
+  const lines = markdownContent.split('\n')
+  let y = 50
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > 270) {
       doc.addPage()
       y = 20
     }
-    doc.text(line, 20, y)
-    y += lineHeight
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\*\*/g, '')
+
+    if (line.startsWith('## ')) {
+      ensureSpace(10)
+      doc.setFontSize(14)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(30, 30, 30)
+      doc.text(line.replace('## ', ''), 20, y)
+      y += 8
+    } else if (line.startsWith('# ')) {
+      ensureSpace(12)
+      doc.setFontSize(16)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(30, 30, 30)
+      doc.text(line.replace('# ', ''), 20, y)
+      y += 10
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(60, 60, 60)
+      const bulletText = line.replace(/^[-*] /, '')
+      const wrapped = doc.splitTextToSize(`• ${bulletText}`, 160)
+      ensureSpace(wrapped.length * 6 + 2)
+      doc.text(wrapped, 28, y)
+      y += wrapped.length * 6 + 2
+    } else if (/^\d+\./.test(line)) {
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(60, 60, 60)
+      const wrapped = doc.splitTextToSize(line, 160)
+      ensureSpace(wrapped.length * 6 + 2)
+      doc.text(wrapped, 28, y)
+      y += wrapped.length * 6 + 2
+    } else if (line.trim() === '') {
+      y += 4
+    } else {
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(60, 60, 60)
+      const wrapped = doc.splitTextToSize(line, 170)
+      ensureSpace(wrapped.length * 6 + 3)
+      doc.text(wrapped, 20, y)
+      y += wrapped.length * 6 + 3
+    }
   }
 
   doc.save(filename)

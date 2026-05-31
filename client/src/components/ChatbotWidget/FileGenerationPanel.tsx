@@ -19,7 +19,7 @@ import {
   exportMd,
   exportPdf,
   exportTxt,
-  downloadTextAsPdf,
+  downloadMarkdownAsPdf,
 } from '../../utils/exportConversation'
 
 type GenerateType = 'summary' | 'report' | 'analysis'
@@ -103,23 +103,28 @@ export default function FileGenerationPanel({
         format: outFormat,
       })
 
+      const content = result.content
+      const docType = result.type
+      const conversationTitle = conversation.title || 'Conversation'
+
       appendGeneratedFile(conversation.id, {
         filename: result.filename,
         format: result.format,
         type: genType,
-        content: result.content,
+        content,
       })
 
-      if (result.format === 'pdf') {
-        downloadTextAsPdf(result.filename, result.content, result.filename)
-      } else if (result.format === 'docx') {
-        downloadFile(
-          result.content,
-          result.filename,
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      if (outFormat === 'pdf') {
+        downloadMarkdownAsPdf(
+          docType,
+          conversationTitle,
+          content,
+          `${docType.toLowerCase()}-${Date.now()}.pdf`,
         )
-      } else {
-        downloadFile(result.content, result.filename, 'text/plain;charset=utf-8')
+      } else if (outFormat === 'txt') {
+        downloadFile(content, `${docType.toLowerCase()}.txt`, 'text/plain')
+      } else if (outFormat === 'docx') {
+        downloadFile(content, `${docType.toLowerCase()}.md`, 'text/markdown')
       }
 
       flashSuccess('Downloaded!')
