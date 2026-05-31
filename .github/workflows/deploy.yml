@@ -1,0 +1,85 @@
+name: Deploy
+
+# Runs after CI succeeds on main, or manually from the Actions tab.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Trigger Render backend deploy
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK not set — skipping Render deploy"
+            exit 0
+          fi
+          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
+          echo "Render deploy hook triggered"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy frontend to Vercel
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        working-directory: client
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Vercel secrets not set — skipping frontend deploy"
+            exit 0
+          fi
+          npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx vercel build --prod --token="$VERCEL_TOKEN"
+          npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy summary
+        run: |
+          {
+            echo "## Deploy"
+            echo ""
+            echo "| Target | Status |"
+            echo "|--------|--------|"
+            if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+              echo "| Render (backend) | triggered |"
+            else
+              echo "| Render (backend) | skipped — add \`RENDER_DEPLOY_HOOK\` |"
+            fi
+            if [ -n "${{ secrets.VERCEL_TOKEN }}" ]; then
+              echo "| Vercel (frontend) | deployed |"
+            else
+              echo "| Vercel (frontend) | skipped — add Vercel secrets |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
