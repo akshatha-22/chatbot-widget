@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { RotateCcw, RotateCw, X, Send } from 'lucide-react'
 import type { Message } from '../../types'
 import { sendMessage } from '../../api/chat'
+import { generatePDFFromContent } from '../../utils/pdfGenerator'
 
 const MAX_INPUT_LENGTH = 2000
 
@@ -78,6 +79,12 @@ export default function MessageEditModal({
     setSending(true)
     try {
       const assistant = await sendMessage(conversationId, edited)
+      if (assistant.has_pdf && assistant.pdf_content) {
+        void generatePDFFromContent(
+          assistant.pdf_content,
+          assistant.pdf_filename || 'remi-generated.pdf',
+        )
+      }
       onReplaceEditedMessage(userMessage.id, edited, assistant)
       onClose()
     } finally {

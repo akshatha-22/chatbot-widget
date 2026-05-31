@@ -9,6 +9,9 @@ class ConversationBase(BaseSchema):
 class ConversationCreate(BaseSchema):
     title: Optional[str] = None
 
+class ConversationRename(BaseSchema):
+    title: str
+
 class ConversationResponse(ConversationBase):
     id: int
     user_id: int

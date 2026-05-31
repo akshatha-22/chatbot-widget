@@ -355,7 +355,7 @@ graph TD
 
 5. **Frontend Setup**:
    ```bash
-   cd ../client
+   cd ../frontend
    npm install
    ```
 

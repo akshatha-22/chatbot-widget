@@ -30,7 +30,8 @@ langchain-community>=0.2.0
 # Vector Store & Embeddings
 
 faiss-cpu>=1.8.0
-sentence-transformers==2.2.2
+huggingface_hub>=0.34.0
+sentence-transformers>=2.7.0
 
 # File Processing
 

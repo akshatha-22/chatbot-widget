@@ -1,7 +1,7 @@
 import os
 # Redirect HuggingFace caches to E: drive to bypass C: drive being full
-os.environ["HF_HOME"] = "E:\\huggingface"
-os.environ["SENTENCE_TRANSFORMERS_HOME"] = "E:\\huggingface"
+#os.environ["HF_HOME"] = "E:\\huggingface"
+#os.environ["SENTENCE_TRANSFORMERS_HOME"] = "E:\\huggingface"
 
 import pickle
 import faiss

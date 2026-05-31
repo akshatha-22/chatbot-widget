@@ -1,10 +1,17 @@
-import { defineConfig } from 'vite'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
+
+function resolvePkg(pkg: string) {
+  const local = path.join(__dirname, 'node_modules', pkg)
+  if (fs.existsSync(path.join(local, 'package.json'))) return local
+  return path.join(repoRoot, 'node_modules', pkg)
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -13,9 +20,8 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      // npm workspaces hoists react to repo root; Vite pre-bundle needs explicit paths
-      react: path.join(repoRoot, 'node_modules/react'),
-      'react-dom': path.join(repoRoot, 'node_modules/react-dom'),
+      react: resolvePkg('react'),
+      'react-dom': resolvePkg('react-dom'),
       '@': path.resolve(__dirname, 'src'),
       '@components': path.resolve(__dirname, 'src/components'),
       '@styles': path.resolve(__dirname, 'src/styles'),

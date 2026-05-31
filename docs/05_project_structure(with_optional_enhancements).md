@@ -9,7 +9,7 @@ This document outlines the complete project structure for the AI Chatbot Widget 
 ```
 chatbot-widget/
 ├── backend/                          # FastAPI backend application
-├── client/                         # React widget frontend
+├── frontend/                         # React widget frontend
 ├── docs/                             # Documentation files
 ├── docker/                           # Docker configuration files
 ├── scripts/                          # Utility scripts
@@ -208,7 +208,7 @@ backend/
 ## 3. Frontend Structure (With Optional Enhancements)
 
 ```
-client/
+frontend/
 ├── public/                           # Static assets
 │   ├── index.html                   # Main HTML file
 │   ├── favicon.ico                  # Favicon
@@ -417,7 +417,7 @@ docs/
 ```
 docker/
 ├── backend.Dockerfile              # Backend Docker image
-├── client.Dockerfile             # Widget static build (Vite → nginx)
+├── frontend.Dockerfile             # Frontend Docker image
 ├── nginx.Dockerfile                # Nginx reverse proxy
 ├── postgres.Dockerfile             # PostgreSQL database
 ├── redis.Dockerfile                # (OPTIONAL) Redis cache
@@ -425,7 +425,7 @@ docker/
 ├── entrypoint.sh                    # Container entry script
 └── kubernetes/                      # (OPTIONAL) Kubernetes configs
     ├── backend-deployment.yaml      # Backend deployment
-    ├── client-deployment.yaml     # Frontend deployment
+    ├── frontend-deployment.yaml     # Frontend deployment
     ├── redis-deployment.yaml        # Redis deployment
     ├── postgres-deployment.yaml     # PostgreSQL deployment
     ├── service.yaml                 # Service configuration
@@ -581,7 +581,7 @@ pip install -r requirements.txt
 pip install -r requirements-optional.txt  # For optional features
 
 # Frontend development
-cd client
+cd frontend
 npm install
 npm start
 

@@ -4,7 +4,12 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database.db import get_db, User
-from app.schemas.conversation import ConversationCreate, ConversationResponse, ConversationDetailResponse
+from app.schemas.conversation import (
+    ConversationCreate,
+    ConversationRename,
+    ConversationResponse,
+    ConversationDetailResponse,
+)
 from app.schemas.message import MessageCreate, MessageResponse
 from app.services import auth_service, chat_service
 
@@ -21,6 +26,7 @@ class GenerateConversationResponse(BaseModel):
     filename: str
     format: str
     content: str
+    type: str
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -60,6 +66,19 @@ def get_conversation_details(
 ):
     """Get a detailed view of a conversation including all its messages."""
     return chat_service.get_conversation(db, conversation_id, current_user.id)
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
+def rename_conversation_session(
+    conversation_id: int,
+    body: ConversationRename,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a conversation (persists across restarts)."""
+    return chat_service.rename_conversation(
+        db, conversation_id, current_user.id, body.title
+    )
+
 
 @router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_conversation_session(

@@ -3,17 +3,37 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Warm Minimal design system
+        amber: {
+          DEFAULT: '#F59E0B',
+          50: '#FFFBF0',
+          400: '#FBBF24',
+          500: '#F59E0B',
+          600: '#D97706',
+        },
+        warm: {
+          bg: '#FAFAFA',
+          surface: '#FFFFFF',
+          border: '#F0F0F0',
+          bubble: '#F5F5F5',
+          ink: '#1A1A1A',
+          sub: '#8C8C8C',
+          faint: '#ACACAC',
+          label: '#4A4A4A',
+        },
         primary: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          900: '#082f49',
+          50: '#FFFBF0',
+          100: '#FEF3C7',
+          500: '#F59E0B',
+          600: '#D97706',
+          700: '#B45309',
+          900: '#78350F',
         },
       },
       fontFamily: {
         sans: [
+          'Inter',
+          'system-ui',
           '-apple-system',
           'BlinkMacSystemFont',
           '"Segoe UI"',
@@ -29,6 +49,9 @@ export default {
         slideInUp: 'slideInUp 300ms ease-out',
         slideInDown: 'slideInDown 300ms ease-out',
         scaleIn: 'scaleIn 250ms ease-out',
+        bubbleIn: 'bubbleIn 200ms ease forwards',
+        widgetIn: 'widgetIn 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        dotWave: 'dotWave 1.2s ease-in-out infinite',
       },
     },
   },
