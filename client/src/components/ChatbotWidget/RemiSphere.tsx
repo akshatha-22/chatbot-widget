@@ -126,42 +126,34 @@ export default function RemiSphere({ size = 68, className = '' }: RemiSphereProp
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <motion.path
+                <path
                   d={expr.leftEyebrow}
-                  animate={{ d: expr.leftEyebrow }}
-                  transition={{ duration: 0.3 }}
                   stroke={FACE}
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   fill="none"
                 />
-                <motion.path
+                <path
                   d={expr.rightEyebrow}
-                  animate={{ d: expr.rightEyebrow }}
-                  transition={{ duration: 0.3 }}
                   stroke={FACE}
                   strokeWidth="1.5"
                   strokeLinecap="round"
                   fill="none"
                 />
-                <motion.circle
+                <circle
                   cx={expr.leftEye.cx}
+                  cy={expr.leftEye.cy}
                   r="1.5"
                   fill={FACE}
-                  animate={{ cy: expr.leftEye.cy }}
-                  transition={{ duration: 0.3 }}
                 />
-                <motion.circle
+                <circle
                   cx={expr.rightEye.cx}
+                  cy={expr.rightEye.cy}
                   r="1.5"
                   fill={FACE}
-                  animate={{ cy: expr.rightEye.cy }}
-                  transition={{ duration: 0.3 }}
                 />
-                <motion.path
+                <path
                   d={expr.mouth}
-                  animate={{ d: expr.mouth }}
-                  transition={{ duration: 0.3 }}
                   stroke={FACE}
                   strokeWidth="1.5"
                   strokeLinecap="round"

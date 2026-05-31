@@ -24,11 +24,64 @@ def _gemini_models_to_try() -> List[str]:
     return out
 
 
-def _call_gemini(prompt: str) -> tuple[Optional[str], Optional[str]]:
-    """Returns (text, error_detail). error_detail is set when all models fail."""
-    if not settings.GEMINI_API_KEY:
-        return None, None
+def _gemini_configured() -> bool:
+    return settings.gemini_configured()
 
+
+def _gemini_grounding_config():
+    """Google Search grounding — model decides when to search (news, weather, scores, etc.)."""
+    from google.genai import types
+
+    return types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+    )
+
+
+def _gemini_genai_client():
+    from google import genai
+
+    return genai.Client(api_key=settings.GEMINI_API_KEY.strip())
+
+
+def _response_text(response) -> str:
+    try:
+        return (response.text or "").strip()
+    except (ValueError, AttributeError):
+        return ""
+
+
+def _stream_chunk_text(chunk) -> str:
+    try:
+        return chunk.text or ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def _call_gemini_with_search(prompt: str) -> tuple[Optional[str], Optional[str]]:
+    """Gemini via google-genai with Google Search grounding."""
+    client = _gemini_genai_client()
+    config = _gemini_grounding_config()
+    last_error: Optional[str] = None
+
+    for model_name in _gemini_models_to_try():
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            )
+            text = _response_text(response)
+            if text:
+                return text, None
+        except Exception as e:
+            last_error = f"{model_name}: {e}"
+            print(f"Gemini search error ({model_name}): {e}")
+
+    return None, last_error
+
+
+def _call_gemini_legacy(prompt: str) -> tuple[Optional[str], Optional[str]]:
+    """Fallback without search if google-genai or grounding fails."""
     import google.generativeai as genai
 
     genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -38,29 +91,57 @@ def _call_gemini(prompt: str) -> tuple[Optional[str], Optional[str]]:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
-            text = (response.text or "").strip()
+            text = _response_text(response)
             if text:
                 return text, None
         except Exception as e:
             last_error = f"{model_name}: {e}"
-            print(f"Gemini API error ({model_name}): {e}")
+            print(f"Gemini legacy error ({model_name}): {e}")
 
     return None, last_error
 
 
-def _chunk_text(chunk) -> str:
-    """Extract text from a Gemini streaming chunk."""
+def _call_gemini(prompt: str) -> tuple[Optional[str], Optional[str]]:
+    """Returns (text, error_detail). Prefers Search-grounded google-genai, then legacy."""
+    if not _gemini_configured():
+        return None, None
+
     try:
-        return chunk.text or ""
-    except (ValueError, AttributeError):
-        return ""
+        text, err = _call_gemini_with_search(prompt)
+        if text:
+            return text, None
+    except ImportError:
+        print("google-genai not installed; using legacy Gemini client without search.")
+    except Exception as e:
+        print(f"Gemini search client failed: {e}")
+
+    return _call_gemini_legacy(prompt)
 
 
-def _stream_gemini(prompt: str) -> Iterator[str]:
-    """Stream Gemini response chunks. Yields nothing if all models fail."""
-    if not settings.GEMINI_API_KEY:
-        return
+def _stream_gemini_with_search(prompt: str) -> Iterator[str]:
+    client = _gemini_genai_client()
+    config = _gemini_grounding_config()
 
+    for model_name in _gemini_models_to_try():
+        try:
+            stream = client.models.generate_content_stream(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            )
+            yielded = False
+            for chunk in stream:
+                text = _stream_chunk_text(chunk)
+                if text:
+                    yielded = True
+                    yield text
+            if yielded:
+                return
+        except Exception as e:
+            print(f"Gemini search stream error ({model_name}): {e}")
+
+
+def _stream_gemini_legacy(prompt: str) -> Iterator[str]:
     import google.generativeai as genai
 
     genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -69,13 +150,36 @@ def _stream_gemini(prompt: str) -> Iterator[str]:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt, stream=True)
+            yielded = False
             for chunk in response:
-                text = _chunk_text(chunk)
+                text = _stream_chunk_text(chunk)
                 if text:
+                    yielded = True
                     yield text
-            return
+            if yielded:
+                return
         except Exception as e:
-            print(f"Gemini stream error ({model_name}): {e}")
+            print(f"Gemini legacy stream error ({model_name}): {e}")
+
+
+def _stream_gemini(prompt: str) -> Iterator[str]:
+    """Stream Gemini reply; uses Google Search grounding when google-genai is available."""
+    if not _gemini_configured():
+        return
+
+    streamed = False
+    try:
+        for piece in _stream_gemini_with_search(prompt):
+            streamed = True
+            yield piece
+        if streamed:
+            return
+    except ImportError:
+        print("google-genai not installed; streaming without search.")
+    except Exception as e:
+        print(f"Gemini search stream failed: {e}")
+
+    yield from _stream_gemini_legacy(prompt)
 
 
 def format_sse(text: str) -> str:
@@ -270,7 +374,9 @@ def _prepare_assistant_context(
         db.add(conv)
         db.commit()
 
-    history = conv.messages[-6:-1]
+    ordered = sorted(conv.messages, key=lambda m: m.created_at or datetime.min)
+    # Exclude the message we are replying to (last row is the current user turn).
+    history = ordered[-7:-1] if len(ordered) > 1 else []
     rag_context = build_rag_context(db, conversation_id, user_message)
     rag_block = (
         f"Relevant context from uploaded documents:\n{rag_context}\n\n"
@@ -279,8 +385,11 @@ def _prepare_assistant_context(
     )
 
     gemini_prompt = (
-        "You are a helpful assistant named Remi. Answer the user request briefly and politely.\n"
-        f"{MARKDOWN_INSTRUCTION}\n"
+        "You are Remi, a helpful AI assistant. Answer the user's questions directly "
+        "and helpfully. Be concise and accurate.\n"
+        "You can use Google Search for real-time information (news, weather, live scores, "
+        "stock prices, current events). When search is used, cite sources briefly.\n"
+        f"{MARKDOWN_INSTRUCTION}\n\n"
     )
     for msg in history:
         gemini_prompt += f"{msg.role.capitalize()}: {msg.content}\n"
@@ -314,9 +423,9 @@ def _fallback_assistant_content(
         )
 
     msg_lower = user_message.lower()
-    if any(greet in msg_lower for greet in ["hello", "hi", "hey", "greetings"]):
+    if re.search(r"\b(?:hello|hi|hey|greetings)\b", msg_lower):
         return "Hello! I'm Remi. How can I help you today?"
-    if "help" in msg_lower:
+    if re.search(r"\bhelp\b", msg_lower):
         return (
             "I can assist you with understanding the application, answering questions, "
             "or managing files. What would you like to do?"
@@ -339,14 +448,15 @@ def _fallback_assistant_content(
 def _openai_assistant_content(
     history: List[Message], user_message: str, rag_context: str
 ) -> str:
-    if not settings.OPENAI_API_KEY:
+    if not settings.openai_configured():
         return ""
     try:
         from openai import OpenAI
 
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
         system_prompt = (
-            "You are a helpful assistant named Remi. "
+            "You are Remi, a helpful AI assistant. Answer the user's questions directly "
+            "and helpfully. Be concise and accurate. "
             f"{MARKDOWN_INSTRUCTION}"
         )
         if rag_context:
@@ -376,7 +486,7 @@ def iter_assistant_chunks(
         db, conversation_id, user_id, user_message
     )
 
-    if settings.GEMINI_API_KEY:
+    if _gemini_configured():
         streamed = False
         for piece in _stream_gemini(gemini_prompt):
             streamed = True
@@ -459,10 +569,13 @@ def get_conversation(db: Session, conversation_id: int, user_id: int) -> Convers
 
 
 def list_conversations(db: Session, user_id: int) -> List[Conversation]:
-    """List all conversations for a user, sorted by creation date descending."""
-    return db.query(Conversation).filter(
-        Conversation.user_id == user_id
-    ).order_by(Conversation.created_at.desc()).all()
+    """List all conversations for a user, newest first."""
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+        .all()
+    )
 
 
 def rename_conversation(
@@ -550,7 +663,7 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     assistant_content = ""
     gemini_error: Optional[str] = None
 
-    if settings.GEMINI_API_KEY:
+    if _gemini_configured():
         assistant_content, gemini_error = _call_gemini(gemini_prompt)
         if assistant_content is None:
             assistant_content = ""
@@ -569,11 +682,11 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
 def generate_text(prompt: str) -> str:
     """Generate text from a one-shot prompt via Gemini, with OpenAI fallback."""
     content = ""
-    if settings.GEMINI_API_KEY:
+    if _gemini_configured():
         content, _ = _call_gemini(prompt)
         content = (content or "").strip()
 
-    if not content and settings.OPENAI_API_KEY:
+    if not content and settings.openai_configured():
         try:
             from openai import OpenAI
 

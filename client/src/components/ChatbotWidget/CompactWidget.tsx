@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Maximize2, Minus, X, Paperclip, Send, Mic, LogOut, Download } from 'lucide-react'
-import { streamMessage } from '../../api/chat'
+import { streamSendMessage } from './streamSend'
 import type { Message, Conversation, UploadedFile } from '../../types'
 import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import FileUploadModal from './FileUploadModal'
@@ -41,6 +41,7 @@ export default function CompactWidget({
 }: CompactWidgetProps) {
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const isSendingRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [fileUploadOpen, setFileUploadOpen] = useState(false)
 
@@ -50,65 +51,17 @@ export default function CompactWidget({
 
   const handleSend = async () => {
     const content = input.trim()
-    if (!content || !conversation || isTyping) return
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-    }
-    const assistantId = `stream-${Date.now()}`
-
-    onMessagesChange((prev) => [...prev, userMsg])
+    if (!content || !conversation) return
     setInput('')
-    setIsTyping(true)
-
-    try {
-      await streamMessage(conversation.id, content, {
-        onChunk: (chunk) => {
-          setIsTyping(false)
-          onMessagesChange((prev) => {
-            const existing = prev.find((m) => m.id === assistantId)
-            if (!existing) {
-              return [
-                ...prev,
-                {
-                  id: assistantId,
-                  role: 'assistant',
-                  content: chunk,
-                  created_at: new Date().toISOString(),
-                },
-              ]
-            }
-            return prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + chunk } : m,
-            )
-          })
-        },
-        onDone: (msg) => {
-          setIsTyping(false)
-          onMessagesChange((prev) => {
-            const existing = prev.find((m) => m.id === assistantId)
-            if (existing) {
-              return prev.map((m) => (m.id === assistantId ? msg : m))
-            }
-            return [...prev, msg]
-          })
-          if (msg.has_pdf && msg.pdf_content) {
-            void generatePDFFromContent(
-              msg.pdf_content,
-              msg.pdf_filename || 'remi-generated.pdf',
-            )
-          }
-          void onRefreshConversations()
-        },
-      })
-    } catch {
-      onMessagesChange((prev) => prev.filter((m) => m.id !== assistantId))
-    } finally {
-      setIsTyping(false)
-    }
+    await streamSendMessage({
+      conversation,
+      content,
+      isTyping,
+      isSendingRef,
+      onMessagesChange,
+      onRefreshConversations,
+      setIsTyping,
+    })
   }
 
   const handleOpenFileUpload = () => {

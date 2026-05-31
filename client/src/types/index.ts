@@ -17,7 +17,7 @@ export interface Message {
 export interface UploadedFile {
   id: string;
   filename: string;
-  status: 'pending' | 'processed';
+  status: 'pending' | 'processed' | 'failed';
   created_at: string;
 }
 

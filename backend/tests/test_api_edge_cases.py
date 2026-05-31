@@ -386,8 +386,8 @@ def test_upload_parse_failure(client, auth_headers, conversation_id, upload_dir)
             headers=auth_headers,
             files={"file": ("bad.pdf", io.BytesIO(b"%PDF"), "application/pdf")},
         )
-    assert response.status_code == 422
-    assert "Failed to process" in response.json()["detail"]
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
 
 
 def test_upload_index_failure(client, auth_headers, conversation_id, upload_dir):
@@ -400,7 +400,8 @@ def test_upload_index_failure(client, auth_headers, conversation_id, upload_dir)
             headers=auth_headers,
             files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
         )
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
 
 
 def test_upload_docx_parsed(client, auth_headers, conversation_id, upload_dir):

@@ -1,4 +1,5 @@
 from pathlib import Path
+from dotenv import load_dotenv
 from pydantic import AliasChoices, Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
@@ -47,6 +48,21 @@ def _resolved_env_files() -> tuple[str, ...]:
 _EXISTING_ENV_FILES = _resolved_env_files()
 
 
+def _bootstrap_dotenv() -> None:
+    """Load .env files into os.environ before Settings() (works even if only one path exists)."""
+    for path in (
+        _BACKEND_DIR / ".env",
+        _BACKEND_DIR / ".env.local",
+        _ROOT_DIR / ".env",
+        _ROOT_DIR / ".env.local",
+    ):
+        if path.is_file():
+            load_dotenv(path, override=True)
+
+
+_bootstrap_dotenv()
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Chatbot Widget API"
     API_V1_STR: str = "/api/v1"
@@ -87,12 +103,18 @@ class Settings(BaseSettings):
             return s[1:-1].strip()
         return s
 
+    def gemini_configured(self) -> bool:
+        return bool((self.GEMINI_API_KEY or "").strip())
+
+    def openai_configured(self) -> bool:
+        return bool((self.OPENAI_API_KEY or "").strip())
+
     model_config = SettingsConfigDict(
         env_file=_EXISTING_ENV_FILES if _EXISTING_ENV_FILES else None,
         env_file_encoding="utf-8",
         # OS env + .env keys often vary by case on Windows; match either form
         case_sensitive=False,
-        extra="ignore",
+        extra="allow",
     )
 
 

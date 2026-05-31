@@ -30,6 +30,7 @@ const ChatbotWidget = () => {
   const [chatReady, setChatReady] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
   const seenAssistantCount = useRef(0)
+  const chatInitRef = useRef(false)
 
   // Verify any existing token once on mount — the widget owns its own auth.
   useEffect(() => {
@@ -83,6 +84,8 @@ const ChatbotWidget = () => {
 
   useEffect(() => {
     if (!user) return
+    if (chatInitRef.current) return
+    chatInitRef.current = true
     let cancelled = false
 
     async function init() {
@@ -111,6 +114,21 @@ const ChatbotWidget = () => {
       cancelled = true
     }
   }, [user, loadConversationData])
+
+  // Poll while any file is still indexing (background embedding on server).
+  useEffect(() => {
+    if (!activeConversation || !user) return
+    const hasPending = files.some((f) => f.status === 'pending')
+    if (!hasPending) return
+
+    const conversationId = activeConversation.id
+    const interval = setInterval(async () => {
+      const updated = await listFiles(conversationId).catch(() => null)
+      if (updated) setFiles(updated)
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [files, activeConversation, user])
 
   const handleSelectConversation = useCallback(
     async (conv: Conversation) => {
@@ -172,6 +190,7 @@ const ChatbotWidget = () => {
 
   const handleLogout = useCallback(() => {
     apiLogout()
+    chatInitRef.current = false
     setUser(null)
     setChatReady(false)
     setConversations([])

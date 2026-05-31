@@ -29,6 +29,7 @@ def test_upload_and_list_file(client, auth_headers, conversation_id, upload_dir)
     files = listed.json()
     assert len(files) == 1
     assert files[0]["id"] == data["id"]
+    assert files[0]["status"] == "processed"
 
 
 def test_upload_requires_auth(client, conversation_id):

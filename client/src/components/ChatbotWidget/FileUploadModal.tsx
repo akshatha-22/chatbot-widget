@@ -229,6 +229,23 @@ export default function FileUploadModal({
                             Uploading…
                           </div>
                         )}
+                        {!r.uploading && r.uploaded?.status === 'pending' && (
+                          <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
+                            <span
+                              className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0"
+                              aria-hidden
+                            />
+                            Processing…
+                          </div>
+                        )}
+                        {!r.uploading && r.uploaded?.status === 'processed' && (
+                          <div className="mt-1 text-xs text-green-500">✓ Ready</div>
+                        )}
+                        {!r.uploading && r.uploaded?.status === 'failed' && (
+                          <div className="mt-1 text-xs text-red-500">
+                            ✗ Failed — try again
+                          </div>
+                        )}
                         {!r.uploading && r.error && (
                           <div className="mt-1 text-xs text-red-600">{r.error}</div>
                         )}

@@ -54,6 +54,19 @@ def client(db_session):
 
 
 @pytest.fixture(autouse=True)
+def patch_background_db_session(db_engine, monkeypatch):
+    """Background file tasks must use the same DB as the TestClient override."""
+    bg_session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    monkeypatch.setattr("app.api.v1.files.SessionLocal", bg_session)
+
+
+@pytest.fixture(autouse=True)
+def inline_file_processing(monkeypatch):
+    """Run file embedding synchronously in API tests."""
+    monkeypatch.setenv("INLINE_FILE_PROCESSING", "1")
+
+
+@pytest.fixture(autouse=True)
 def disable_external_llm_keys(monkeypatch):
     """Keep chat tests deterministic — use local fallback, no live API calls."""
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")

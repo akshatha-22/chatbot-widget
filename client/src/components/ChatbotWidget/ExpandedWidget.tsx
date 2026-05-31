@@ -8,12 +8,10 @@ import {
   Search,
   Star,
   Check,
-  Loader2,
   LayoutList,
   LogOut,
 } from 'lucide-react'
-import { streamMessage } from '../../api/chat'
-import { generatePDFFromContent } from '../../utils/pdfGenerator'
+import { streamSendMessage } from './streamSend'
 import { uploadFile } from '../../api/files'
 import ChatInterface from './ChatInterface'
 import WidgetConversationDashboard from './WidgetConversationDashboard'
@@ -86,6 +84,7 @@ export default function ExpandedWidget({
   const [view, setView] = useState<View>('chat')
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const isSendingRef = useRef(false)
   const [showSaved, setShowSaved] = useState(false)
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -126,66 +125,18 @@ export default function ExpandedWidget({
 
   const handleSend = async () => {
     const content = input.trim()
-    if (!content || !conversation || isTyping) return
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-    }
-    const assistantId = `stream-${Date.now()}`
-
-    onMessagesChange((prev) => [...prev, userMsg])
+    if (!content || !conversation) return
     setInput('')
-    setIsTyping(true)
-
-    try {
-      await streamMessage(conversation.id, content, {
-        onChunk: (chunk) => {
-          setIsTyping(false)
-          onMessagesChange((prev) => {
-            const existing = prev.find((m) => m.id === assistantId)
-            if (!existing) {
-              return [
-                ...prev,
-                {
-                  id: assistantId,
-                  role: 'assistant',
-                  content: chunk,
-                  created_at: new Date().toISOString(),
-                },
-              ]
-            }
-            return prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + chunk } : m,
-            )
-          })
-        },
-        onDone: (msg) => {
-          setIsTyping(false)
-          onMessagesChange((prev) => {
-            const existing = prev.find((m) => m.id === assistantId)
-            if (existing) {
-              return prev.map((m) => (m.id === assistantId ? msg : m))
-            }
-            return [...prev, msg]
-          })
-          if (msg.has_pdf && msg.pdf_content) {
-            void generatePDFFromContent(
-              msg.pdf_content,
-              msg.pdf_filename || 'remi-generated.pdf',
-            )
-          }
-          flashSaved()
-          void onRefreshConversations()
-        },
-      })
-    } catch {
-      onMessagesChange((prev) => prev.filter((m) => m.id !== assistantId))
-    } finally {
-      setIsTyping(false)
-    }
+    await streamSendMessage({
+      conversation,
+      content,
+      isTyping,
+      isSendingRef,
+      onMessagesChange,
+      onRefreshConversations,
+      setIsTyping,
+    })
+    flashSaved()
   }
 
   const handleReplaceEditedMessage = (
@@ -477,6 +428,7 @@ export default function ExpandedWidget({
                   )}
                   {files.map((f) => {
                     const processed = f.status === 'processed'
+                    const failed = f.status === 'failed'
                     return (
                       <div
                         key={f.id}
@@ -491,21 +443,23 @@ export default function ExpandedWidget({
                           <p className="text-xs font-medium text-[#1A1A1A] truncate">
                             {f.filename}
                           </p>
-                          <p
-                            className={`flex items-center gap-1 text-[11px] ${
-                              processed ? 'text-[#22C55E]' : 'text-[#F59E0B]'
-                            }`}
-                          >
-                            {processed ? (
-                              <>
-                                <Check size={11} /> Ready
-                              </>
-                            ) : (
-                              <>
-                                <Loader2 size={11} className="animate-spin" /> Processing
-                              </>
-                            )}
-                          </p>
+                          {processed ? (
+                            <p className="flex items-center gap-1 text-[11px] text-[#22C55E]">
+                              <Check size={11} /> Ready
+                            </p>
+                          ) : failed ? (
+                            <p className="text-[11px] text-red-500">
+                              ✗ Failed — try again
+                            </p>
+                          ) : (
+                            <p className="flex items-center gap-1 text-[11px] text-amber-500">
+                              <span
+                                className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0"
+                                aria-hidden
+                              />
+                              Processing…
+                            </p>
+                          )}
                         </div>
                       </div>
                     )
