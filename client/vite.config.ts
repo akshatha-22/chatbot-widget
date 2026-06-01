@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -13,10 +13,20 @@ function resolvePkg(pkg: string) {
   return path.join(repoRoot, 'node_modules', pkg)
 }
 
+function resolveApiUrl(mode: string): string {
+  const fromFiles = loadEnv(mode, repoRoot, 'VITE_').VITE_API_URL
+  // Vercel injects env at build time via process.env — must not rely on .env files alone
+  const raw = process.env.VITE_API_URL ?? fromFiles ?? 'http://localhost:8000'
+  return raw.replace(/\/$/, '')
+}
+
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // Use repo-root `.env*` so one `.env.local` covers Vite + backend (see backend/app/config.py)
   envDir: repoRoot,
+  define: {
+    'import.meta.env.VITE_API_URL': JSON.stringify(resolveApiUrl(mode)),
+  },
   plugins: [react()],
   resolve: {
     alias: {
@@ -39,4 +49,4 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
-})
+}))
