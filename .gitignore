@@ -38,3 +38,5 @@ client/dist/
 .vscode/*
 !.vscode/extensions.json
 *.log
+.vercel
+.env*

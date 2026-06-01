@@ -1,0 +1,35 @@
+# Keep Vercel uploads small — only frontend build inputs are needed.
+node_modules/
+client/node_modules/
+backend/node_modules/
+
+# Python (not used on Vercel — backend runs on Railway)
+backend/venv/
+backend/.venv/
+.ci-venv/
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local data & ML caches
+backend/data/
+*.db
+.huggingface/
+**/.cache/
+
+# Build output (Vercel rebuilds fresh)
+client/dist/
+dist/
+
+# Git & IDE
+.git/
+.vscode/
+*.log
+
+# Tests & docs (not needed for frontend build)
+backend/tests/
+**/*.md
+!client/**/*.md
