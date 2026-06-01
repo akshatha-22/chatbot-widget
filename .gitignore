@@ -4,6 +4,7 @@ node_modules/
 # Python virtual environments (recreate locally — do not commit)
 venv/
 .venv/
+.ci-venv/
 env/
 backend/venv/
 backend/.venv/
