@@ -57,6 +57,48 @@ def _stream_chunk_text(chunk) -> str:
         return ""
 
 
+def _call_gemini_without_search(prompt: str) -> tuple[Optional[str], Optional[str]]:
+    """Gemini without Google Search — prefer when answering from uploaded documents."""
+    client = _gemini_genai_client()
+    last_error: Optional[str] = None
+
+    for model_name in _gemini_models_to_try():
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            text = _response_text(response)
+            if text:
+                return text, None
+        except Exception as e:
+            last_error = f"{model_name}: {e}"
+            print(f"Gemini (no search) error ({model_name}): {e}")
+
+    return None, last_error
+
+
+def _stream_gemini_without_search(prompt: str) -> Iterator[str]:
+    client = _gemini_genai_client()
+
+    for model_name in _gemini_models_to_try():
+        try:
+            stream = client.models.generate_content_stream(
+                model=model_name,
+                contents=prompt,
+            )
+            yielded = False
+            for chunk in stream:
+                text = _stream_chunk_text(chunk)
+                if text:
+                    yielded = True
+                    yield text
+            if yielded:
+                return
+        except Exception as e:
+            print(f"Gemini (no search) stream error ({model_name}): {e}")
+
+
 def _call_gemini_with_search(prompt: str) -> tuple[Optional[str], Optional[str]]:
     """Gemini via google-genai with Google Search grounding."""
     client = _gemini_genai_client()
@@ -101,10 +143,21 @@ def _call_gemini_legacy(prompt: str) -> tuple[Optional[str], Optional[str]]:
     return None, last_error
 
 
-def _call_gemini(prompt: str) -> tuple[Optional[str], Optional[str]]:
+def _call_gemini(prompt: str, *, use_search: bool = True) -> tuple[Optional[str], Optional[str]]:
     """Returns (text, error_detail). Prefers Search-grounded google-genai, then legacy."""
     if not _gemini_configured():
         return None, None
+
+    if not use_search:
+        try:
+            text, err = _call_gemini_without_search(prompt)
+            if text:
+                return text, None
+        except ImportError:
+            print("google-genai not installed; using legacy Gemini client.")
+        except Exception as e:
+            print(f"Gemini (no search) client failed: {e}")
+        return _call_gemini_legacy(prompt)
 
     try:
         text, err = _call_gemini_with_search(prompt)
@@ -162,9 +215,24 @@ def _stream_gemini_legacy(prompt: str) -> Iterator[str]:
             print(f"Gemini legacy stream error ({model_name}): {e}")
 
 
-def _stream_gemini(prompt: str) -> Iterator[str]:
-    """Stream Gemini reply; uses Google Search grounding when google-genai is available."""
+def _stream_gemini(prompt: str, *, use_search: bool = True) -> Iterator[str]:
+    """Stream Gemini reply; uses Google Search grounding when enabled and available."""
     if not _gemini_configured():
+        return
+
+    if not use_search:
+        streamed = False
+        try:
+            for piece in _stream_gemini_without_search(prompt):
+                streamed = True
+                yield piece
+            if streamed:
+                return
+        except ImportError:
+            print("google-genai not installed; streaming without search.")
+        except Exception as e:
+            print(f"Gemini (no search) stream failed: {e}")
+        yield from _stream_gemini_legacy(prompt)
         return
 
     streamed = False
@@ -378,22 +446,34 @@ def _prepare_assistant_context(
     # Exclude the message we are replying to (last row is the current user turn).
     history = ordered[-7:-1] if len(ordered) > 1 else []
     rag_context = build_rag_context(db, conversation_id, user_message)
-    rag_block = (
-        f"Relevant context from uploaded documents:\n{rag_context}\n\n"
-        if rag_context
-        else ""
-    )
 
-    gemini_prompt = (
-        "You are Remi, a helpful AI assistant. Answer the user's questions directly "
-        "and helpfully. Be concise and accurate.\n"
-        "You can use Google Search for real-time information (news, weather, live scores, "
-        "stock prices, current events). When search is used, cite sources briefly.\n"
-        f"{MARKDOWN_INSTRUCTION}\n\n"
-    )
+    print(f"[RAG] conversation_id: {conversation_id}")
+    print(f"[RAG] context length: {len(rag_context)}")
+    if rag_context:
+        print(f"[RAG] context preview: {rag_context[:200]}")
+
+    if rag_context:
+        gemini_prompt = (
+            "You are Remi, a helpful AI assistant.\n"
+            "The user has uploaded documents. You MUST use the document context below "
+            "to answer their question. Base your answer primarily on the provided context. "
+            "If the context contains the answer, use it directly. "
+            "Do not say you cannot access documents — the content is provided below.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+            f'DOCUMENT CONTEXT:\n"""\n{rag_context}\n"""\n\n'
+            "Answer based on the above context.\n\n"
+        )
+    else:
+        gemini_prompt = (
+            "You are Remi, a helpful AI assistant. Answer the user's questions directly "
+            "and helpfully. Be concise and accurate.\n"
+            "You can use Google Search for real-time information (news, weather, live scores, "
+            "stock prices, current events). When search is used, cite sources briefly.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+        )
+
     for msg in history:
         gemini_prompt += f"{msg.role.capitalize()}: {msg.content}\n"
-    gemini_prompt += rag_block
     gemini_prompt += f"User: {user_message}\nAssistant:"
 
     return conv, gemini_prompt, rag_context, history, None
@@ -488,7 +568,8 @@ def iter_assistant_chunks(
 
     if _gemini_configured():
         streamed = False
-        for piece in _stream_gemini(gemini_prompt):
+        use_search = not bool(rag_context.strip())
+        for piece in _stream_gemini(gemini_prompt, use_search=use_search):
             streamed = True
             yield piece
         if streamed:
@@ -638,15 +719,33 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
     Retrieve the most relevant document chunks for the user message via FAISS search.
     Returns an empty string if no processed files exist for this conversation.
     """
-    file_ids = get_processed_file_ids(db, conversation_id)
-    if not file_ids:
-        return ""
-
     try:
+        files = db.query(UploadedFile).filter(
+            UploadedFile.conversation_id == conversation_id,
+            UploadedFile.status == "processed",
+        ).all()
+        print(f"[RAG] processed files found: {len(files)}")
+        for f in files:
+            print(f"[RAG] file: {f.id} | {f.filename} | {f.status}")
+
+        if not files:
+            print(f"[RAG] No processed files for {conversation_id}")
+            return ""
+
+        file_ids = [f.id for f in files]
+        print(f"[RAG] Searching {len(file_ids)} files")
+
         chunks = vector_store_service.search(file_ids, user_message, top_k=5)
-        return "\n\n".join(chunks) if chunks else ""
+        if not chunks:
+            print("[RAG] No chunks returned from FAISS")
+            return ""
+
+        return "\n\n".join(chunks)
     except Exception as e:
-        print(f"RAG vector search error: {e}")
+        print(f"[RAG] Error building context: {e}")
+        import traceback
+
+        traceback.print_exc()
         return ""
 
 
@@ -664,7 +763,8 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     gemini_error: Optional[str] = None
 
     if _gemini_configured():
-        assistant_content, gemini_error = _call_gemini(gemini_prompt)
+        use_search = not bool(rag_context.strip())
+        assistant_content, gemini_error = _call_gemini(gemini_prompt, use_search=use_search)
         if assistant_content is None:
             assistant_content = ""
 

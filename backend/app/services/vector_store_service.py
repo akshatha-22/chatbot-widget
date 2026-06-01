@@ -77,7 +77,7 @@ def chunk_and_store(file_id: str, text: str):
 
     chunks = split_text(text)
     if not chunks:
-        return
+        raise ValueError("No indexable text chunks after splitting document")
 
     model = get_embedding_model()
     embeddings = model.encode(chunks)
@@ -114,7 +114,11 @@ def search(file_ids: List[str], query: str, top_k: int = 5) -> List[str]:
         index_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.index")
         chunks_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.chunks")
 
+        print(f"[FAISS] Looking for index at: {index_path}")
+        print(f"[FAISS] Index exists: {os.path.exists(index_path)}")
+
         if not os.path.exists(index_path) or not os.path.exists(chunks_path):
+            print(f"[FAISS] Index not found for {file_id}")
             continue
 
         try:
@@ -128,7 +132,10 @@ def search(file_ids: List[str], query: str, top_k: int = 5) -> List[str]:
                 if idx != -1 and idx < len(chunks):
                     all_matches.append((chunks[idx], float(dist)))
         except Exception as e:
-            print(f"Error searching vector store for file {file_id}: {e}")
+            print(f"[FAISS] Search error for {file_id}: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     all_matches.sort(key=lambda x: x[1])
 
