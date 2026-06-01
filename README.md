@@ -1,4 +1,5 @@
 # Remi — AI Chatbot Widget
+**Live demo:** https://remi-zeta-nine.vercel.app
 
 A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI assistant. Users sign in inside the widget, chat with streaming responses, upload documents for RAG-backed answers, export conversations, and generate PDFs—either from the Generate panel or directly in chat with natural language.
 
