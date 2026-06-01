@@ -21,7 +21,7 @@ const apiClient = axios.create({
 /** Longer timeout for uploads; embedding runs in the background on the server. */
 export const uploadClient = axios.create({
   baseURL: `${API_URL}/api/v1`,
-  timeout: 120000,
+  timeout: 180000,
 });
 
 attachAuthInterceptor(apiClient);

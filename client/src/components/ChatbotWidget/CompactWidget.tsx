@@ -16,6 +16,7 @@ export type CompactWidgetProps = {
   onFilesChange: React.Dispatch<React.SetStateAction<UploadedFile[]>>
   onToggleStar: (id: string) => void
   onRefreshConversations: () => Promise<unknown>
+  streamControllerRef?: React.MutableRefObject<AbortController | null>
   onExpand: () => void
   onClose: () => void
   onLogout?: () => void
@@ -32,9 +33,11 @@ function formatTime(iso: string): string {
 export default function CompactWidget({
   conversation,
   messages,
+  files,
   onMessagesChange,
   onFilesChange,
   onRefreshConversations,
+  streamControllerRef,
   onExpand,
   onClose,
   onLogout,
@@ -44,6 +47,11 @@ export default function CompactWidget({
   const isSendingRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [fileUploadOpen, setFileUploadOpen] = useState(false)
+
+  useEffect(() => {
+    setIsTyping(false)
+    isSendingRef.current = false
+  }, [conversation?.id])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -58,6 +66,7 @@ export default function CompactWidget({
       content,
       isTyping,
       isSendingRef,
+      streamControllerRef,
       onMessagesChange,
       onRefreshConversations,
       setIsTyping,
@@ -249,6 +258,7 @@ export default function CompactWidget({
         <FileUploadModal
           open={fileUploadOpen}
           conversationId={conversation.id}
+          files={files}
           onClose={() => setFileUploadOpen(false)}
           onUploaded={(uploaded) => {
             onFilesChange((prev) =>

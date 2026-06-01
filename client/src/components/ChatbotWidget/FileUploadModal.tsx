@@ -5,11 +5,12 @@ import {
   FileSpreadsheet,
   X,
   Loader2,
+  Check,
 } from 'lucide-react'
 import type { UploadedFile } from '../../types'
 import { uploadFile } from '../../api/files'
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024
+const MAX_FILE_BYTES = 100 * 1024 * 1024
 const MAX_FILES_PER_BATCH = 10
 const SUPPORTED_EXTS = ['pdf', 'txt', 'docx', 'xlsx', 'md'] as const
 type SupportedExt = (typeof SUPPORTED_EXTS)[number]
@@ -44,6 +45,7 @@ function pickFileIcon(ext: SupportedExt) {
 export interface FileUploadModalProps {
   open: boolean
   conversationId: string
+  files?: UploadedFile[]
   onClose: () => void
   onUploaded?: (file: UploadedFile) => void
 }
@@ -51,6 +53,7 @@ export interface FileUploadModalProps {
 export default function FileUploadModal({
   open,
   conversationId,
+  files = [],
   onClose,
   onUploaded,
 }: FileUploadModalProps) {
@@ -70,7 +73,7 @@ export default function FileUploadModal({
         continue
       }
       if (f.size > MAX_FILE_BYTES) {
-        errors.push(`${f.name}: exceeds 50MB`)
+        errors.push(`${f.name}: exceeds 100MB`)
         continue
       }
       ok.push(f)
@@ -142,6 +145,13 @@ export default function FileUploadModal({
     setRows((prev) => prev.filter((r) => r.id !== id))
   }
 
+  /** Parent polls listFiles — use live status when available. */
+  const rowStatus = (row: UploadRow): UploadedFile['status'] | undefined => {
+    if (!row.uploaded) return undefined
+    const live = files.find((f) => f.id === row.uploaded!.id)
+    return live?.status ?? row.uploaded.status
+  }
+
   if (!open) return null
 
   return (
@@ -158,7 +168,7 @@ export default function FileUploadModal({
           <div>
             <div className="text-sm font-semibold text-gray-800">Upload files</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              PDF, TXT, DOCX, XLSX, MD — Max 50MB
+              PDF, TXT, DOCX, XLSX, MD — Max 100MB
             </div>
           </div>
           <button
@@ -210,6 +220,7 @@ export default function FileUploadModal({
               <div className="space-y-2">
                 {rows.map((r) => {
                   const ext = getExt(r.file.name)
+                  const status = rowStatus(r)
                   return (
                     <div
                       key={r.id}
@@ -229,7 +240,7 @@ export default function FileUploadModal({
                             Uploading…
                           </div>
                         )}
-                        {!r.uploading && r.uploaded?.status === 'pending' && (
+                        {!r.uploading && status === 'pending' && (
                           <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
                             <span
                               className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0"
@@ -238,12 +249,16 @@ export default function FileUploadModal({
                             Processing…
                           </div>
                         )}
-                        {!r.uploading && r.uploaded?.status === 'processed' && (
-                          <div className="mt-1 text-xs text-green-500">✓ Ready</div>
+                        {!r.uploading && status === 'processed' && (
+                          <div className="mt-1 text-xs text-green-500 flex items-center gap-1">
+                            <Check size={12} aria-hidden />
+                            Ready
+                          </div>
                         )}
-                        {!r.uploading && r.uploaded?.status === 'failed' && (
-                          <div className="mt-1 text-xs text-red-500">
-                            ✗ Failed — try again
+                        {!r.uploading && status === 'failed' && (
+                          <div className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                            <X size={12} aria-hidden />
+                            Failed — try again
                           </div>
                         )}
                         {!r.uploading && r.error && (

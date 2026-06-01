@@ -106,6 +106,7 @@ export async function streamMessage(
   conversationId: string,
   content: string,
   handlers: StreamMessageHandlers,
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('token')
   const url = `${API_BASE}/api/v1/chat/conversations/${conversationId}/messages/stream`
@@ -119,8 +120,12 @@ export async function streamMessage(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ content }),
+      signal,
     })
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return
+    }
     const error = err instanceof Error ? err : new Error('Network error')
     handlers.onError?.(error)
     throw error
@@ -161,6 +166,7 @@ export async function streamMessage(
 
   try {
     while (true) {
+      if (signal?.aborted) break
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -178,6 +184,9 @@ export async function streamMessage(
       processEventBlock(buffer)
     }
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return
+    }
     const error = err instanceof Error ? err : new Error('Stream read failed')
     handlers.onError?.(error)
     throw error

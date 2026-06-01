@@ -54,6 +54,7 @@ export type ExpandedWidgetProps = {
   onFilesChange: React.Dispatch<React.SetStateAction<UploadedFile[]>>
   onToggleStar: (id: string) => void
   onRefreshConversations: () => Promise<Conversation[]>
+  streamControllerRef?: React.MutableRefObject<AbortController | null>
   onSelectConversation: (conv: Conversation) => void | Promise<void>
   onNewConversation: () => void | Promise<void>
   onDeleteConversation: (id: string) => void | Promise<void>
@@ -73,6 +74,7 @@ export default function ExpandedWidget({
   onFilesChange,
   onToggleStar,
   onRefreshConversations,
+  streamControllerRef,
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
@@ -93,6 +95,11 @@ export default function ExpandedWidget({
   const [fileUploadOpen, setFileUploadOpen] = useState(false)
   const [rightTab, setRightTab] = useState<'files' | 'generate'>('files')
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    setIsTyping(false)
+    isSendingRef.current = false
+  }, [conversation?.id])
 
   useEffect(() => {
     if (view === 'chat') {
@@ -132,6 +139,7 @@ export default function ExpandedWidget({
       content,
       isTyping,
       isSendingRef,
+      streamControllerRef,
       onMessagesChange,
       onRefreshConversations,
       setIsTyping,
@@ -448,8 +456,8 @@ export default function ExpandedWidget({
                               <Check size={11} /> Ready
                             </p>
                           ) : failed ? (
-                            <p className="text-[11px] text-red-500">
-                              ✗ Failed — try again
+                            <p className="flex items-center gap-1 text-[11px] text-red-500">
+                              <X size={11} aria-hidden /> Failed — try again
                             </p>
                           ) : (
                             <p className="flex items-center gap-1 text-[11px] text-amber-500">
@@ -477,6 +485,7 @@ export default function ExpandedWidget({
         <FileUploadModal
           open={fileUploadOpen}
           conversationId={conversation.id}
+          files={files}
           onClose={() => setFileUploadOpen(false)}
           onUploaded={handleUploadedFile}
         />

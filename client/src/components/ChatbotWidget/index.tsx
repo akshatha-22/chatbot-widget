@@ -30,6 +30,14 @@ const ChatbotWidget = () => {
   const [chatReady, setChatReady] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
   const seenAssistantCount = useRef(0)
+  const streamControllerRef = useRef<AbortController | null>(null)
+
+  const abortActiveStream = useCallback(() => {
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort()
+      streamControllerRef.current = null
+    }
+  }, [])
 
   // Verify any existing token once on mount — the widget owns its own auth.
   useEffect(() => {
@@ -70,6 +78,7 @@ const ChatbotWidget = () => {
   }, [])
 
   const loadConversationData = useCallback(async (conv: Conversation) => {
+    abortActiveStream()
     setActiveConversation(conv)
     try {
       const msgs = await getConversationMessages(conv.id)
@@ -79,7 +88,7 @@ const ChatbotWidget = () => {
     }
     const uploaded = await listFiles(conv.id).catch(() => [])
     setFiles(uploaded)
-  }, [])
+  }, [abortActiveStream])
 
   useEffect(() => {
     if (!user) {
@@ -128,12 +137,34 @@ const ChatbotWidget = () => {
 
     const conversationId = activeConversation.id
     const interval = setInterval(async () => {
-      const updated = await listFiles(conversationId).catch(() => null)
-      if (updated) setFiles(updated)
+      try {
+        const updated = await listFiles(conversationId)
+        setFiles(updated)
+        const stillPending = updated.some((f) => f.status === 'pending')
+        if (!stillPending) {
+          clearInterval(interval)
+        }
+      } catch (e) {
+        console.error('File polling error:', e)
+        clearInterval(interval)
+      }
     }, 3000)
 
-    return () => clearInterval(interval)
+    const timeout = setTimeout(() => {
+      clearInterval(interval)
+    }, 5 * 60 * 1000)
+
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+    }
   }, [files, activeConversation, user])
+
+  useEffect(() => {
+    return () => {
+      abortActiveStream()
+    }
+  }, [abortActiveStream])
 
   const handleSelectConversation = useCallback(
     async (conv: Conversation) => {
@@ -143,12 +174,13 @@ const ChatbotWidget = () => {
   )
 
   const handleNewConversation = useCallback(async () => {
+    abortActiveStream()
     const created = await createConversation('New Chat')
     setConversations((prev) => [created, ...prev])
     setActiveConversation(created)
     setMessages([])
     setFiles([])
-  }, [])
+  }, [abortActiveStream])
 
   const handleDeleteConversation = useCallback(
     async (id: string) => {
@@ -194,6 +226,7 @@ const ChatbotWidget = () => {
   }
 
   const handleLogout = useCallback(() => {
+    abortActiveStream()
     apiLogout()
     setUser(null)
     setChatReady(false)
@@ -203,7 +236,7 @@ const ChatbotWidget = () => {
     setFiles([])
     setIsExpanded(false)
     seenAssistantCount.current = 0
-  }, [])
+  }, [abortActiveStream])
 
   const sharedProps = {
     conversation: activeConversation,
@@ -216,6 +249,7 @@ const ChatbotWidget = () => {
     starredIds,
     onToggleStar: handleToggleStar,
     onRefreshConversations: refreshConversations,
+    streamControllerRef,
   }
 
   if (!isOpen) {

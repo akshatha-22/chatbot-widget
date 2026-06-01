@@ -9,7 +9,7 @@ export const uploadFile = async (conversationId: string, file: File) => {
     form,
     {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 120000,
+      timeout: 180000,
     },
   );
   return data;

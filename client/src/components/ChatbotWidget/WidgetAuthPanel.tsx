@@ -90,7 +90,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
           <RemiAvatar2D size={48} />
         </div>
         <h2 className="text-lg font-semibold text-[#1A1A1A] text-center">
-          {isLogin ? 'Welcome to Remi' : 'Create your account'} <span aria-hidden>🌟</span>
+          {isLogin ? 'Welcome to Remi' : 'Create your account'}
         </h2>
         <p className="mt-1 text-sm text-[#8C8C8C] text-center">
           {isLogin ? 'Sign in to start chatting' : 'Sign up to start chatting'}

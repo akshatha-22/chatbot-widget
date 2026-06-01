@@ -8,6 +8,7 @@ export type StreamSendParams = {
   content: string
   isTyping: boolean
   isSendingRef: MutableRefObject<boolean>
+  streamControllerRef?: MutableRefObject<AbortController | null>
   onMessagesChange: React.Dispatch<React.SetStateAction<Message[]>>
   onRefreshConversations: () => Promise<unknown>
   setIsTyping: (value: boolean) => void
@@ -19,6 +20,7 @@ export async function streamSendMessage({
   content,
   isTyping,
   isSendingRef,
+  streamControllerRef,
   onMessagesChange,
   onRefreshConversations,
   setIsTyping,
@@ -26,6 +28,7 @@ export async function streamSendMessage({
   if (!content || isTyping || isSendingRef.current) return
   isSendingRef.current = true
 
+  const conversationId = conversation.id
   const userMsg: Message = {
     id: Date.now().toString(),
     role: 'user',
@@ -34,12 +37,21 @@ export async function streamSendMessage({
   }
   const assistantId = `stream-${Date.now()}`
 
+  const controller = new AbortController()
+  if (streamControllerRef) {
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort()
+    }
+    streamControllerRef.current = controller
+  }
+
   onMessagesChange((prev) => [...prev, userMsg])
   setIsTyping(true)
 
   try {
-    await streamMessage(conversation.id, content, {
+    await streamMessage(conversationId, content, {
       onChunk: (chunk) => {
+        if (controller.signal.aborted) return
         setIsTyping(false)
         onMessagesChange((prev) => {
           const existing = prev.find((m) => m.id === assistantId)
@@ -60,6 +72,7 @@ export async function streamSendMessage({
         })
       },
       onDone: (msg) => {
+        if (controller.signal.aborted) return
         setIsTyping(false)
         onMessagesChange((prev) => {
           const existing = prev.find((m) => m.id === assistantId)
@@ -76,11 +89,21 @@ export async function streamSendMessage({
         }
         void onRefreshConversations()
       },
-    })
-  } catch {
-    onMessagesChange((prev) => prev.filter((m) => m.id !== assistantId))
+    }, controller.signal)
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return
+    }
+    if (!controller.signal.aborted) {
+      onMessagesChange((prev) => prev.filter((m) => m.id !== assistantId))
+    }
   } finally {
-    setIsTyping(false)
+    if (streamControllerRef?.current === controller) {
+      streamControllerRef.current = null
+    }
+    if (!controller.signal.aborted) {
+      setIsTyping(false)
+    }
     isSendingRef.current = false
   }
 }

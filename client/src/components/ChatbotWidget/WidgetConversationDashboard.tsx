@@ -187,7 +187,9 @@ export default function WidgetConversationDashboard({
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
-                  <th className="w-10 px-3 py-2 text-left">★</th>
+                  <th className="w-10 px-3 py-2 text-left">
+                    <Star size={14} className="text-gray-500" aria-label="Starred" />
+                  </th>
                   <th className="px-2 py-2 text-left">Title</th>
                   <th className="px-2 py-2 text-left">Preview</th>
                   <th className="w-16 px-2 py-2 text-left">Files</th>

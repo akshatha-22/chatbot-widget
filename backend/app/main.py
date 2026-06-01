@@ -1,13 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 from app.config import settings
 from app.database.db import Base, engine
 from app.api.v1 import auth, chat, files
+from app.api.v1.files import MAX_FILE_SIZE
 
 # Automatically create tables in database (useful for SQLite/dev setups)
 Base.metadata.create_all(bind=engine)
-
 
 def _migrate_message_pdf_columns() -> None:
     """Add PDF columns to existing SQLite DBs without recreating tables."""
@@ -34,6 +35,19 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+
+@app.middleware("http")
+async def limit_upload_size(request: Request, call_next):
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_FILE_SIZE:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "File too large. Maximum size is 100MB."},
+            )
+    return await call_next(request)
+
 
 # Configure CORS Middleware
 if settings.BACKEND_CORS_ORIGINS:
