@@ -1,0 +1,9 @@
+# Docker / Railway image — core app + DB + vector deps.
+# torch + sentence-transformers are installed in separate Dockerfile layers (CPU wheels).
+
+-r requirements-ci-core.txt
+
+psycopg2-binary==2.9.9
+faiss-cpu>=1.8.0
+huggingface_hub>=0.34.0
+numpy>=1.26.0
