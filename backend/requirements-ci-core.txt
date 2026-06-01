@@ -1,0 +1,34 @@
+# Shared by requirements.txt (via includes) and CI.
+# Keep in sync with the non-ML sections of requirements.txt.
+
+# Core Framework
+fastapi>=0.115.0
+uvicorn[standard]==0.24.0
+httpx>=0.28.1
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+bcrypt>=4.0.0,<5
+python-dotenv==1.0.0
+
+# LLM & AI (imported lazily in chat_service when keys are set)
+google-genai>=1.0.0
+google-generativeai>=0.8.0
+openai>=1.40.0
+
+# File Processing
+pydantic>=2.7.0,<3
+python-docx==0.8.11
+openpyxl==3.1.2
+PyPDF2==3.0.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Utilities
+pydantic-settings>=2.1.0

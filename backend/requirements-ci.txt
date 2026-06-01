@@ -1,0 +1,4 @@
+# CI / pytest — core app + tests without heavy ML wheels (torch, sentence-transformers).
+# Tests mock FAISS indexing; vector_store_service uses lazy imports for ML deps.
+
+-r requirements-ci-core.txt

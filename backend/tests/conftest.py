@@ -73,6 +73,15 @@ def disable_external_llm_keys(monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
 
 
+@pytest.fixture(autouse=True)
+def noop_vector_index_by_default(monkeypatch):
+    """Avoid loading sentence-transformers/torch unless a test overrides this."""
+    monkeypatch.setattr(
+        "app.services.vector_store_service.chunk_and_store",
+        lambda *args, **kwargs: None,
+    )
+
+
 @pytest.fixture()
 def auth_headers(client):
     """Register a user and return Authorization headers for protected routes."""

@@ -38,7 +38,12 @@ From the `backend/` directory:
 # Activate venv first (Windows)
 venv\Scripts\activate
 
+# CI / quick test install (no torch — matches GitHub Actions)
+pip install -r requirements-ci.txt
+
+# Full local dev (RAG / FAISS / embeddings)
 pip install -r requirements.txt
+
 python -m pytest tests/ -v
 ```
 
