@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./chatbot.db"
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: object) -> object:
+        # Railway/Heroku often provide postgres:// — SQLAlchemy 2 expects postgresql://
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
+
     # Comma-separated in .env (CORS_ORIGINS); exposed as list via BACKEND_CORS_ORIGINS
     cors_origins: str = Field(
         default=",".join(_DEFAULT_CORS_ORIGINS),
@@ -86,6 +94,18 @@ class Settings(BaseSettings):
     def BACKEND_CORS_ORIGINS(self) -> List[str]:
         parts = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
         return parts if parts else list(_DEFAULT_CORS_ORIGINS)
+
+    # Regex for preview deploys, e.g. https://remi-abc123.vercel.app
+    cors_origin_regex: str = Field(
+        default=r"https://.*\.vercel\.app",
+        validation_alias=AliasChoices("CORS_ORIGIN_REGEX", "BACKEND_CORS_ORIGIN_REGEX"),
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def BACKEND_CORS_ORIGIN_REGEX(self) -> str | None:
+        value = (self.cors_origin_regex or "").strip()
+        return value or None
 
     # LLM Settings
     GEMINI_API_KEY: str = ""
