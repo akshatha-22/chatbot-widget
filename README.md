@@ -10,7 +10,7 @@ This README reflects **what is in the repository today**, derived from the runni
 ## Table of Contents
 
 1. [What This Project Is](#what-this-project-is)
-2. [Tech Stack (Actual)](#tech-stack-actual)
+2. [Tech Stack](#tech-stack)
 3. [Quick Start](#quick-start)
 4. [Architecture](#architecture)
 5. [Features](#features)
