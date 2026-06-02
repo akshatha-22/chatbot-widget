@@ -41,12 +41,16 @@ const OUTPUT_FORMATS: { value: OutputFormat; label: string }[] = [
 export interface FileGenerationPanelProps {
   conversation: Conversation | null
   messages: Message[]
+  /** Compact layout for mobile Files tab */
+  variant?: 'sidebar' | 'embedded'
 }
 
 export default function FileGenerationPanel({
   conversation,
   messages,
+  variant = 'sidebar',
 }: FileGenerationPanelProps) {
+  const embedded = variant === 'embedded'
   const [genType, setGenType] = useState<GenerateType>('summary')
   const [outFormat, setOutFormat] = useState<OutputFormat>('pdf')
   const [generating, setGenerating] = useState(false)
@@ -148,6 +152,90 @@ export default function FileGenerationPanel({
     return label
   }
 
+  if (embedded) {
+    return (
+      <div className="mx-3 mb-4 space-y-4">
+        <section className="rounded-xl border border-[#F0F0F0] bg-white p-4">
+          <p className="mb-3 text-sm font-medium text-[#4A4A4A]">Generate File</p>
+          <div className="mb-3 flex gap-2">
+            <select
+              value={genType}
+              onChange={(e) => setGenType(e.target.value as GenerateType)}
+              disabled={!canUse || busy}
+              className="flex-1 rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#F59E0B]/30 disabled:opacity-50"
+            >
+              {GENERATE_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={outFormat}
+              onChange={(e) => setOutFormat(e.target.value as OutputFormat)}
+              disabled={!canUse || busy}
+              className="rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#F59E0B]/30 disabled:opacity-50"
+            >
+              {OUTPUT_FORMATS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleGenerate()}
+            disabled={!canUse || busy}
+            className="min-h-[44px] w-full rounded-lg bg-[#F59E0B] py-2.5 text-sm font-medium text-white active:scale-[0.98] disabled:opacity-50 md:hover:bg-[#D97706]"
+          >
+            {generating ? 'Generating…' : 'Generate'}
+          </button>
+          {successMsg && (
+            <p className="mt-2 flex items-center gap-1 text-xs text-green-600">
+              <Check size={12} />
+              {successMsg}
+            </p>
+          )}
+        </section>
+
+        <section>
+          <p className="mb-2 px-0 text-xs font-medium text-[#8C8C8C]">
+            Export conversation
+          </p>
+          <div className="scrollbar-hide flex gap-2 overflow-x-auto pb-2 touch-scroll">
+            {(['TXT', 'PDF', 'JSON', 'MD'] as const).map((label, i) => {
+              const fmt = (['txt', 'pdf', 'json', 'md'] as ExportFormat[])[i]
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => handleExport(fmt)}
+                  disabled={!canUse || busy}
+                  className="flex min-h-[44px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-xs text-[#4A4A4A] active:bg-[#F5F5F5] disabled:opacity-50"
+                >
+                  {exportButtonLabel(fmt, label)}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              disabled={!canUse || busy}
+              onClick={() => handleExport('html')}
+              className="flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-xs text-[#4A4A4A] active:bg-[#F5F5F5] disabled:opacity-50"
+            >
+              More
+            </button>
+          </div>
+        </section>
+
+        {error && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex flex-col">
       <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
@@ -169,7 +257,7 @@ export default function FileGenerationPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 touch-scroll">
         <section className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center justify-between">
             <div>

@@ -55,5 +55,23 @@ export default {
       },
     },
   },
-  plugins: [require('@tailwindcss/typography')],
+  plugins: [
+    require('@tailwindcss/typography'),
+    function ({ addUtilities }) {
+      addUtilities({
+        '.scrollbar-hide': {
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none',
+          '&::-webkit-scrollbar': { display: 'none' },
+        },
+        '.pb-safe': {
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        },
+        '.touch-scroll': {
+          '-webkit-overflow-scrolling': 'touch',
+          'overscroll-behavior': 'contain',
+        },
+      })
+    },
+  ],
 }

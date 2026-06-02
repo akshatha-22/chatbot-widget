@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { Calendar, Filter, X } from 'lucide-react'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 export type DateRangePreset = 'last30' | 'last7' | 'custom'
 
@@ -43,6 +44,7 @@ export default function SearchFilterPanel({
   onApply,
   onClear,
 }: SearchFilterPanelProps) {
+  const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<SearchFilters>(value)
 
@@ -57,31 +59,15 @@ export default function SearchFilterPanel({
     return true
   }, [draft])
 
-  return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-        >
-          <Filter size={16} />
-          Filter
-        </button>
-      </Popover.Trigger>
-
-      <Popover.Portal>
-        <Popover.Content
-          sideOffset={8}
-          align="end"
-          className="w-[360px] rounded-xl border border-gray-200 bg-white shadow-xl p-4 z-50"
-        >
+  const filterBody = (
+    <>
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-gray-800">
               Search &amp; Filters
             </div>
             <button
               type="button"
-              className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-gray-400 active:bg-gray-100 md:hover:bg-gray-100"
               aria-label="Close"
               onClick={() => setOpen(false)}
             >
@@ -99,7 +85,7 @@ export default function SearchFilterPanel({
                   setDraft((p) => ({ ...p, text: clampText(e.target.value) }))
                 }
                 placeholder="Title contains…"
-                className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2 pr-9 outline-none focus:border-indigo-400"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 pr-9 text-base outline-none focus:border-indigo-400 md:text-sm"
               />
               {draft.text.trim().length > 0 && (
                 <button
@@ -235,30 +221,83 @@ export default function SearchFilterPanel({
             </div>
           </div>
 
-          {/* Footer buttons */}
-          <div className="mt-5 flex items-center justify-between">
-            <button
-              type="button"
-              className="px-3 py-2 rounded-lg bg-gray-100 text-sm text-gray-700 hover:bg-gray-200"
-              onClick={() => {
-                onClear()
-                setOpen(false)
-              }}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              disabled={!canApply}
-              className="px-3 py-2 rounded-lg bg-indigo-500 text-sm text-white hover:bg-indigo-600 disabled:opacity-50"
-              onClick={() => {
-                onApply(draft)
-                setOpen(false)
-              }}
-            >
-              Apply
-            </button>
+      {/* Footer buttons */}
+      <div className="mt-5 flex gap-2 max-md:mt-4">
+        <button
+          type="button"
+          className="min-h-[44px] flex-1 rounded-xl border border-gray-200 py-2.5 text-sm text-gray-600 active:bg-gray-50 md:rounded-lg md:hover:bg-gray-50"
+          onClick={() => {
+            onClear()
+            setOpen(false)
+          }}
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          disabled={!canApply}
+          className="min-h-[44px] flex-1 rounded-xl bg-[#F59E0B] py-2.5 text-sm font-medium text-white active:opacity-90 disabled:opacity-50 md:rounded-lg md:bg-indigo-500 md:hover:bg-indigo-600"
+          onClick={() => {
+            onApply(draft)
+            setOpen(false)
+          }}
+        >
+          Apply
+        </button>
+      </div>
+    </>
+  )
+
+  const filterTrigger = (
+    <button
+      type="button"
+      className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 active:bg-gray-50 md:hover:bg-gray-50"
+    >
+      <Filter size={16} />
+      Filter
+    </button>
+  )
+
+  if (isMobile) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 active:bg-gray-50"
+        >
+          <Filter size={16} />
+          Filter
+        </button>
+        {open && (
+          <div
+            className="fixed inset-0 z-[60] flex items-end bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setOpen(false)
+            }}
+          >
+            <div className="max-h-[85vh] w-full animate-slideInUp overflow-y-auto rounded-t-2xl border border-gray-100 bg-white p-4 pb-safe touch-scroll">
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-gray-200" />
+              {filterBody}
+            </div>
           </div>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>{filterTrigger}</Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          sideOffset={8}
+          align="end"
+          className="z-50 w-[360px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl"
+        >
+          {filterBody}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

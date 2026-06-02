@@ -81,26 +81,27 @@ export default function CompactWidget({
   const hasText = input.trim().length > 0
 
   return (
-    <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] flex flex-col overflow-hidden z-50 animate-widgetIn origin-bottom-right">
+    <div className="fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:max-h-[min(92vh,640px)] max-md:rounded-t-2xl max-md:rounded-b-none md:bottom-[100px] md:right-[20px] md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl md:origin-bottom-right">
       {/* Header */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA]">
-        <div className="flex items-center gap-2.5">
+      <header className="flex shrink-0 items-center justify-between border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA] px-3 py-2.5 md:px-4 md:py-3">
+        <div className="flex min-w-0 items-center gap-2">
           <RemiAvatar2D size={28} className="shrink-0" />
-          <div className="leading-tight">
-            <p className="text-sm font-semibold text-[#1A1A1A]">Remi</p>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate text-sm font-semibold text-[#1A1A1A]">Remi</p>
             <p className="flex items-center gap-1 text-[11px] text-[#8C8C8C]">
-              <span className="h-2 w-2 rounded-full bg-[#22C55E]" />
+              <span className="h-2 w-2 shrink-0 rounded-full bg-[#22C55E]" />
               Online
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           {onLogout && (
             <button
               type="button"
               onClick={onLogout}
-              className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
               aria-label="Sign out"
+              title="Sign out"
             >
               <LogOut size={16} />
             </button>
@@ -108,24 +109,27 @@ export default function CompactWidget({
           <button
             type="button"
             onClick={onExpand}
-            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
-            aria-label="Expand"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
+            aria-label="Expand widget"
+            title="Expand"
           >
             <Maximize2 size={16} />
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
             aria-label="Minimize"
+            title="Minimize"
           >
             <Minus size={16} />
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
             aria-label="Close"
+            title="Close"
           >
             <X size={16} />
           </button>

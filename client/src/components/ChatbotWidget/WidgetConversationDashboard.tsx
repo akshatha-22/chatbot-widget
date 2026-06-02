@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Search, Star } from 'lucide-react'
+import { ArrowLeft, Search, Star, MoreVertical } from 'lucide-react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { getConversationMessages, getConversations } from '../../api/chat'
 import { listFiles } from '../../api/files'
 import type { Conversation, Message } from '../../types'
@@ -7,6 +8,7 @@ import SearchFilterPanel, {
   DEFAULT_FILTERS,
   type SearchFilters,
 } from '../SearchFilterPanel'
+import { filterByFolder } from '../../utils/conversationFoldersStorage'
 
 type Status = 'active' | 'completed' | 'archived'
 
@@ -68,6 +70,8 @@ function isWithinDateFilter(iso: string, f: SearchFilters): boolean {
 
 export type WidgetConversationDashboardProps = {
   starredIds: Set<string>
+  archivedIds: Set<string>
+  trashedIds: Set<string>
   onToggleStar: (id: string) => void
   onSelectConversation: (conv: Conversation) => void
   onBack: () => void
@@ -75,14 +79,18 @@ export type WidgetConversationDashboardProps = {
 
 export default function WidgetConversationDashboard({
   starredIds,
+  archivedIds,
+  trashedIds,
   onToggleStar,
   onSelectConversation,
   onBack,
 }: WidgetConversationDashboardProps) {
+  const isMobile = useIsMobile()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<Row[]>([])
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS)
+  const [category, setCategory] = useState<'All' | 'Starred' | 'Archived' | 'Trash'>('All')
 
   useEffect(() => {
     let cancelled = false
@@ -135,22 +143,33 @@ export default function WidgetConversationDashboard({
       if (r.status === 'completed') return filters.statusCompleted
       return filters.statusArchived
     })
+    const folderIds = filterByFolder(
+      base.map((r) => r.conversation),
+      category,
+      starredIds,
+      archivedIds,
+      trashedIds,
+    ).map((c) => String(c.id))
+    base = base.filter((r) => folderIds.includes(String(r.conversation.id)))
     return base
-  }, [rows, query, filters])
+  }, [rows, query, filters, category, starredIds, archivedIds, trashedIds])
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-gray-50">
-      <div className="shrink-0 bg-white border-b border-gray-200 px-4 py-3">
-        <div className="flex items-center gap-3 mb-3">
+    <div className="flex min-h-0 flex-1 flex-col bg-gray-50 max-md:pb-14">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
+        <div className="mb-3 flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+            className="flex min-h-[44px] items-center gap-1 rounded-lg px-2 text-sm text-gray-600 active:bg-gray-100 md:min-w-[44px] md:justify-center md:p-2 md:text-gray-500 md:hover:bg-gray-100"
             aria-label="Back to chat"
           >
             <ArrowLeft size={18} />
+            <span className="md:hidden">Back</span>
           </button>
-          <h2 className="text-base font-semibold text-gray-800">All Conversations</h2>
+          <h2 className="max-w-[140px] truncate text-base font-semibold text-gray-800 md:max-w-none">
+            {isMobile ? 'Conversations' : 'All Conversations'}
+          </h2>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -162,7 +181,7 @@ export default function WidgetConversationDashboard({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search conversations"
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-white outline-none focus:border-indigo-400"
+              className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-3 text-base outline-none focus:border-indigo-400 md:py-2 md:text-sm"
             />
           </div>
           <SearchFilterPanel
@@ -177,13 +196,98 @@ export default function WidgetConversationDashboard({
             }}
           />
         </div>
+        {isMobile && (
+          <div className="scrollbar-hide mt-2 flex gap-2 overflow-x-auto touch-scroll">
+            {(['All', 'Starred', 'Archived', 'Trash'] as const).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategory(cat)}
+                className={`min-h-[44px] shrink-0 rounded-full px-3 py-1.5 text-xs font-medium active:opacity-80 ${
+                  category === cat
+                    ? 'bg-[#F59E0B] text-white'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto touch-scroll p-4 max-md:px-3">
         {loading ? (
           <p className="text-sm text-gray-400">Loading conversations…</p>
+        ) : isMobile ? (
+          <div className="flex flex-col gap-2 pb-4">
+            {filteredRows.map((r) => {
+              const id = String(r.conversation.id)
+              const preview = buildPreview(r.messages)
+              const starred = starredIds.has(id)
+              return (
+                <div
+                  key={id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onSelectConversation(r.conversation)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelectConversation(r.conversation)
+                    }
+                  }}
+                  className="min-h-[44px] cursor-pointer rounded-xl border border-gray-100 bg-white p-4 active:bg-gray-50"
+                >
+                  <div className="mb-1 flex items-start justify-between">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onToggleStar(id)
+                        }}
+                        className="shrink-0 p-2 active:opacity-70"
+                        aria-label={starred ? 'Unstar' : 'Star'}
+                      >
+                        <Star
+                          size={14}
+                          className={starred ? 'text-yellow-500' : 'text-gray-300'}
+                          fill={starred ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                      <span className="max-w-[160px] truncate text-sm font-medium text-gray-800">
+                        {r.conversation.title}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-xs text-gray-400">
+                      <span>{r.filesCount} files</span>
+                      <MoreVertical size={14} />
+                    </div>
+                  </div>
+                  <p className="mb-1 truncate text-xs text-gray-500">
+                    You: {preview.user ?? '—'}
+                  </p>
+                  <p className="mb-2 truncate text-xs text-gray-400">
+                    AI: {preview.assistant ?? '—'}
+                  </p>
+                  <div className="flex items-center justify-between">
+                    {statusBadge(r.status)}
+                    <span className="text-xs text-gray-400">
+                      {formatTimeAgo(r.lastModified)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+            {filteredRows.length === 0 && (
+              <p className="py-8 text-center text-sm text-gray-400">
+                No conversations found.
+              </p>
+            )}
+          </div>
         ) : (
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-600">
                 <tr>

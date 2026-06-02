@@ -129,7 +129,6 @@ export default function FileUploadModal({
     const list = e.target.files
     if (!list) return
     await addFiles(Array.from(list))
-    // allow selecting the same file again
     e.target.value = ''
   }
 
@@ -145,7 +144,6 @@ export default function FileUploadModal({
     setRows((prev) => prev.filter((r) => r.id !== id))
   }
 
-  /** Parent polls listFiles — use live status when available. */
   const rowStatus = (row: UploadRow): UploadedFile['status'] | undefined => {
     if (!row.uploaded) return undefined
     const live = files.find((f) => f.id === row.uploaded!.id)
@@ -156,25 +154,26 @@ export default function FileUploadModal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center"
+      className="fixed inset-0 z-[80] flex max-md:items-end md:items-center md:justify-center md:bg-black/40"
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+      <div className="max-h-[92vh] w-full overflow-hidden bg-white shadow-2xl max-md:animate-slideInUp max-md:rounded-t-2xl md:max-w-2xl md:rounded-xl">
+        <div className="md:hidden mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-gray-200" />
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-gray-800">Upload files</div>
-            <div className="text-xs text-gray-500 mt-0.5">
+            <div className="mt-0.5 text-xs text-gray-500">
               PDF, TXT, DOCX, XLSX, MD — Max 100MB
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-gray-400 active:bg-gray-100 md:hover:bg-gray-100 md:hover:text-gray-700"
             aria-label="Close"
             disabled={uploadingBatch}
           >
@@ -182,15 +181,17 @@ export default function FileUploadModal({
           </button>
         </div>
 
-        <div className="p-4">
+        <div className="overflow-y-auto p-4 touch-scroll max-md:max-h-[70vh]">
           <div
             onDragOver={(e) => {
               e.preventDefault()
               e.stopPropagation()
             }}
             onDrop={handleDrop}
-            className={`w-full border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center gap-2 cursor-pointer ${
-              uploadingBatch ? 'opacity-60' : 'hover:border-indigo-400 hover:bg-indigo-50'
+            className={`flex h-36 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 md:h-auto md:rounded-lg md:p-6 ${
+              uploadingBatch
+                ? 'opacity-60'
+                : 'active:bg-gray-50 md:hover:border-indigo-400 md:hover:bg-indigo-50'
             }`}
             onClick={() => inputRef.current?.click()}
             role="button"
@@ -198,7 +199,7 @@ export default function FileUploadModal({
           >
             <UploadCloud size={22} className="text-indigo-500" />
             <div className="text-sm font-medium text-gray-800">
-              Drag &amp; drop files here or click to browse
+              Drag &amp; drop files here or tap to browse
             </div>
             <div className="text-xs text-gray-500">You can upload multiple files.</div>
           </div>
@@ -214,7 +215,7 @@ export default function FileUploadModal({
 
           {rows.length > 0 && (
             <div className="mt-4">
-              <div className="text-xs font-semibold text-gray-700 mb-2">
+              <div className="mb-2 text-xs font-semibold text-gray-700">
                 Uploaded files
               </div>
               <div className="space-y-2">
@@ -224,39 +225,39 @@ export default function FileUploadModal({
                   return (
                     <div
                       key={r.id}
-                      className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-2"
+                      className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
                     >
                       {ext ? pickFileIcon(ext) : <FileText size={18} className="text-indigo-500" />}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-gray-800 truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-gray-800">
                           {r.file.name}
                         </div>
-                        <div className="text-[11px] text-gray-500 tabular-nums">
+                        <div className="text-[11px] tabular-nums text-gray-500">
                           {formatBytes(r.file.size)}
                         </div>
                         {r.uploading && (
-                          <div className="mt-1 text-xs text-indigo-600 flex items-center gap-1">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600">
                             <Loader2 size={14} className="animate-spin" />
                             Uploading…
                           </div>
                         )}
                         {!r.uploading && status === 'pending' && (
-                          <div className="mt-1 text-xs text-amber-500 flex items-center gap-1">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-amber-500">
                             <span
-                              className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0"
+                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-500 border-t-transparent"
                               aria-hidden
                             />
                             Processing…
                           </div>
                         )}
                         {!r.uploading && status === 'processed' && (
-                          <div className="mt-1 text-xs text-green-500 flex items-center gap-1">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-green-500">
                             <Check size={12} aria-hidden />
                             Ready
                           </div>
                         )}
                         {!r.uploading && status === 'failed' && (
-                          <div className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
                             <X size={12} aria-hidden />
                             Failed — try again
                           </div>
@@ -268,7 +269,7 @@ export default function FileUploadModal({
                       <button
                         type="button"
                         onClick={() => handleRemove(r.id)}
-                        className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-gray-400 active:bg-red-50 active:text-red-600"
                         aria-label="Remove file from list"
                         disabled={r.uploading}
                       >
@@ -282,11 +283,11 @@ export default function FileUploadModal({
           )}
         </div>
 
-        <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
+        <div className="flex justify-end border-t border-gray-100 px-4 py-3 pb-safe max-md:pb-6">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-2 rounded-lg bg-gray-100 text-sm text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+            className="min-h-[44px] w-full rounded-lg bg-gray-100 px-3 py-2.5 text-sm text-gray-700 active:bg-gray-200 disabled:opacity-60 md:w-auto md:hover:bg-gray-200"
             disabled={uploadingBatch}
           >
             Close
@@ -296,4 +297,3 @@ export default function FileUploadModal({
     </div>
   )
 }
-

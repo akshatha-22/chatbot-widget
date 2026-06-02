@@ -65,10 +65,11 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
   }
 
   return (
-    <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] flex flex-col overflow-hidden z-50 animate-widgetIn origin-bottom-right">
+    <div className="fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-0 max-md:rounded-none max-md:origin-center md:bottom-[100px] md:right-[20px] md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl md:origin-bottom-right">
       {/* Header — matches CompactWidget */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA]">
+      <header className="flex shrink-0 items-center justify-between border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA] px-4 py-3 max-md:pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-2.5">
+          <RemiAvatar2D size={28} className="shrink-0 md:hidden" />
           <div className="leading-tight">
             <p className="text-sm font-semibold text-[#1A1A1A]">Remi</p>
             <p className="text-[11px] text-[#8C8C8C]">Your AI assistant</p>
@@ -77,15 +78,15 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
         <button
           type="button"
           onClick={onClose}
-          className="p-1.5 rounded-lg text-[#8C8C8C] hover:bg-[#F5F5F5] hover:text-[#1A1A1A] transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
           aria-label="Close"
         >
-          <X size={16} />
+          <X size={18} />
         </button>
       </header>
 
       {/* Body */}
-      <div className="px-5 py-6 bg-white">
+      <div className="flex-1 overflow-y-auto overscroll-contain bg-white px-5 py-6 max-md:px-4 max-md:pb-[max(1.5rem,env(safe-area-inset-bottom))] touch-scroll">
         <div className="flex justify-center mb-4">
           <RemiAvatar2D size={48} />
         </div>
@@ -104,7 +105,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
             placeholder="you@example.com"
             autoComplete="email"
             required
-            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2.5 text-sm text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
+            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 md:py-2.5 md:text-sm"
           />
           <input
             type="password"
@@ -114,7 +115,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
             autoComplete={isLogin ? 'current-password' : 'new-password'}
             minLength={6}
             required
-            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2.5 text-sm text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
+            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 md:py-2.5 md:text-sm"
           />
 
           {error && (
@@ -126,7 +127,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-[12px] bg-[#F59E0B] py-2.5 text-sm font-semibold text-white hover:bg-[#D97706] active:scale-[0.98] transition-all disabled:opacity-50"
+            className="min-h-[44px] w-full rounded-[12px] bg-[#F59E0B] py-3 text-sm font-semibold text-white active:scale-[0.98] disabled:opacity-50 md:py-2.5 md:hover:bg-[#D97706]"
           >
             {loading ? 'Please wait…' : isLogin ? 'Sign in' : 'Sign up'}
           </button>
@@ -140,7 +141,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
               setIsLogin((prev) => !prev)
               setError('')
             }}
-            className="font-semibold text-[#D97706] hover:underline"
+            className="inline-flex min-h-[44px] items-center font-semibold text-[#D97706] active:opacity-80 md:hover:underline"
           >
             {isLogin ? 'Sign up' : 'Sign in'}
           </button>

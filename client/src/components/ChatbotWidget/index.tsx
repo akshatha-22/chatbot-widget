@@ -13,6 +13,15 @@ import {
 import { getMe, logout as apiLogout } from '../../api/auth'
 import { listFiles } from '../../api/files'
 import { loadStarredIds, toggleStarredId } from '../../utils/starredStorage'
+import {
+  loadArchivedIds,
+  loadTrashedIds,
+  archiveConversationId,
+  unarchiveConversationId,
+  trashConversationId,
+  restoreConversationFromTrash,
+  removeConversationFromFolders,
+} from '../../utils/conversationFoldersStorage'
 import type { Conversation, Message, UploadedFile, User } from '../../types'
 
 const ChatbotWidget = () => {
@@ -27,6 +36,8 @@ const ChatbotWidget = () => {
   const [messages, setMessages] = useState<Message[]>([])
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [starredIds, setStarredIds] = useState<Set<string>>(() => loadStarredIds())
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(() => loadArchivedIds())
+  const [trashedIds, setTrashedIds] = useState<Set<string>>(() => loadTrashedIds())
   const [chatReady, setChatReady] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
   const seenAssistantCount = useRef(0)
@@ -185,6 +196,9 @@ const ChatbotWidget = () => {
   const handleDeleteConversation = useCallback(
     async (id: string) => {
       await deleteConversation(id)
+      removeConversationFromFolders(id)
+      setArchivedIds(loadArchivedIds())
+      setTrashedIds(loadTrashedIds())
       const remaining = conversations.filter((c) => c.id !== id)
       setConversations(remaining)
 
@@ -220,6 +234,34 @@ const ChatbotWidget = () => {
     setStarredIds(toggleStarredId(id))
   }, [])
 
+  const handleArchiveConversation = useCallback((id: string) => {
+    setArchivedIds(archiveConversationId(id))
+    setTrashedIds(loadTrashedIds())
+  }, [])
+
+  const handleUnarchiveConversation = useCallback((id: string) => {
+    setArchivedIds(unarchiveConversationId(id))
+  }, [])
+
+  const handleTrashConversation = useCallback((id: string) => {
+    setTrashedIds(trashConversationId(id))
+    setArchivedIds(loadArchivedIds())
+    if (activeConversation?.id === id) {
+      const remaining = conversations.filter((c) => c.id !== id)
+      if (remaining.length > 0) {
+        void loadConversationData(remaining[0])
+      } else {
+        setActiveConversation(null)
+        setMessages([])
+        setFiles([])
+      }
+    }
+  }, [activeConversation?.id, conversations, loadConversationData])
+
+  const handleRestoreConversation = useCallback((id: string) => {
+    setTrashedIds(restoreConversationFromTrash(id))
+  }, [])
+
   const close = () => {
     setIsOpen(false)
     setIsExpanded(false)
@@ -247,7 +289,13 @@ const ChatbotWidget = () => {
     onClose: close,
     onLogout: handleLogout,
     starredIds,
+    archivedIds,
+    trashedIds,
     onToggleStar: handleToggleStar,
+    onArchiveConversation: handleArchiveConversation,
+    onUnarchiveConversation: handleUnarchiveConversation,
+    onTrashConversation: handleTrashConversation,
+    onRestoreConversation: handleRestoreConversation,
     onRefreshConversations: refreshConversations,
     streamControllerRef,
   }

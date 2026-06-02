@@ -82,6 +82,8 @@ export interface ChatInterfaceProps {
   showWelcome?: boolean
   /** Hide conversation header (e.g. inside ConversationDetail). */
   embedded?: boolean
+  /** Full-width bubbles + 16px inputs on viewports &lt; 768px */
+  mobileLayout?: boolean
 }
 
 export default function ChatInterface({
@@ -100,6 +102,7 @@ export default function ChatInterface({
   bottomRef,
   showWelcome = true,
   embedded = false,
+  mobileLayout = false,
 }: ChatInterfaceProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -212,7 +215,7 @@ export default function ChatInterface({
   const Wrapper = embedded ? 'div' : 'main'
   const wrapperClass = embedded
     ? 'flex-1 flex flex-col min-h-0 min-w-0 bg-white'
-    : 'flex-1 flex flex-col min-w-0 border-r border-[#F0F0F0] bg-white'
+    : 'flex-1 flex flex-col min-h-0 min-w-0 bg-white'
 
   return (<>
     <Wrapper className={wrapperClass}>
@@ -272,10 +275,10 @@ export default function ChatInterface({
           <button
             type="button"
             onClick={handleSearchToggle}
-            className={`p-2 rounded-lg transition-colors ${
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 transition-colors active:bg-[#FFFBF0] ${
               chatSearchOpen || messageFilter
                 ? 'text-[#D97706] bg-[#FFFBF0]'
-                : 'text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0]'
+                : 'text-[#8C8C8C] md:hover:text-[#D97706] md:hover:bg-[#FFFBF0]'
             }`}
             aria-label="Search in conversation"
           >
@@ -285,7 +288,7 @@ export default function ChatInterface({
             type="button"
             onClick={handleShare}
             disabled={!conversation}
-            className="p-2 rounded-lg text-[#8C8C8C] hover:text-[#D97706] hover:bg-[#FFFBF0] disabled:opacity-40"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-[#8C8C8C] active:bg-[#FFFBF0] disabled:opacity-40 md:hover:text-[#D97706] md:hover:bg-[#FFFBF0]"
             aria-label="Share conversation"
           >
             <Share2 size={16} />
@@ -294,7 +297,7 @@ export default function ChatInterface({
             type="button"
             onClick={onDeleteConversation}
             disabled={!conversation}
-            className="p-2 rounded-lg text-[#8C8C8C] hover:text-red-500 hover:bg-red-50 disabled:opacity-40"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-[#8C8C8C] active:bg-red-50 active:text-red-500 disabled:opacity-40 md:hover:text-red-500 md:hover:bg-red-50"
             aria-label="Delete conversation"
           >
             <Trash2 size={16} />
@@ -304,7 +307,7 @@ export default function ChatInterface({
             <DropdownMenu.Trigger asChild>
               <button
                 type="button"
-                className="p-2 rounded-lg text-[#8C8C8C] hover:text-[#1A1A1A] hover:bg-[#F5F5F5]"
+                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-[#8C8C8C] active:bg-[#F5F5F5] md:hover:text-[#1A1A1A] md:hover:bg-[#F5F5F5]"
                 aria-label="More options"
               >
                 <MoreVertical size={16} />
@@ -391,9 +394,13 @@ export default function ChatInterface({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 bg-white">
+      <div className="flex-1 overflow-y-auto touch-scroll bg-white px-4 py-4 md:px-5 md:py-5">
         {showWelcome && filteredMessages.length === 0 && !messageFilter && (
-          <div className="bubble-enter group flex flex-col max-w-[85%]">
+          <div
+            className={`bubble-enter group flex flex-col ${
+              mobileLayout ? 'max-w-[85%]' : 'max-w-[85%] lg:max-w-[70%]'
+            }`}
+          >
             <div className="flex gap-2 items-end">
               <RemiAvatar2D size={24} className="mb-0.5 shrink-0" />
               <div className="bg-[#F5F5F5] rounded-[18px] px-3.5 py-2.5 text-sm text-[#1A1A1A]">
@@ -415,9 +422,11 @@ export default function ChatInterface({
             <div key={m.id}>
               {showDivider && <DateDivider label={formatDateDivider(m.created_at)} />}
               <div
-                className={`message-row flex flex-col max-w-[85%] ${
-                  isUser ? 'ml-auto items-end' : 'items-start'
-                } ${sameSender && !showDivider ? 'mt-1' : 'mt-3'} group`}
+                className={`message-row group flex flex-col ${
+                  mobileLayout ? 'max-w-[85%]' : 'max-w-[85%] lg:max-w-[70%]'
+                } ${isUser ? 'ml-auto items-end' : 'items-start'} ${
+                  sameSender && !showDivider ? 'mt-1' : 'mt-3'
+                }`}
               >
                 <div
                   className={`bubble-enter flex gap-2 items-end w-full ${
@@ -545,13 +554,13 @@ export default function ChatInterface({
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t border-[#F0F0F0] bg-white px-4 py-3">
+      <div className="shrink-0 border-t border-[#F0F0F0] bg-white px-3 py-3 md:px-4">
         <div className="flex items-end gap-2">
           {onOpenFileUploadModal ? (
             <button
               type="button"
               onClick={onOpenFileUploadModal}
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-[#ACACAC] hover:text-[#F59E0B] transition-colors shrink-0"
+              className="flex h-11 w-11 min-h-[44px] shrink-0 items-center justify-center rounded-lg text-[#ACACAC] active:text-[#F59E0B] md:hover:text-[#F59E0B]"
               aria-label="Attach file"
             >
               <Paperclip size={18} />
@@ -561,7 +570,7 @@ export default function ChatInterface({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-9 h-9 rounded-lg flex items-center justify-center text-[#ACACAC] hover:text-[#F59E0B] transition-colors shrink-0"
+                className="flex h-11 w-11 min-h-[44px] shrink-0 items-center justify-center rounded-lg text-[#ACACAC] active:text-[#F59E0B] md:hover:text-[#F59E0B]"
                 aria-label="Attach file"
               >
                 <Paperclip size={18} />
@@ -577,7 +586,16 @@ export default function ChatInterface({
           ) : null}
           <textarea
             value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
+            onChange={(e) => {
+              handleInputChange(e.target.value)
+              if (mobileLayout) {
+                const el = e.target
+                el.style.height = 'auto'
+                const lineHeight = 22
+                const maxLines = 3
+                el.style.height = `${Math.min(el.scrollHeight, lineHeight * maxLines)}px`
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -587,14 +605,18 @@ export default function ChatInterface({
             placeholder="Ask Remi anything..."
             rows={1}
             disabled={!conversation}
-            className="flex-1 resize-none rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2 text-sm text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 min-h-[38px] max-h-32 disabled:opacity-50"
+            className={`flex-1 resize-none rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-2 text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 disabled:opacity-50 ${
+              mobileLayout
+                ? 'min-h-[44px] max-h-[4.5rem] text-base'
+                : 'min-h-[38px] max-h-32 text-sm'
+            }`}
           />
           {input.trim().length > 0 ? (
             <button
               type="button"
               onClick={onSend}
               disabled={!canSend}
-              className="w-9 h-9 rounded-full bg-[#F59E0B] text-white flex items-center justify-center hover:bg-[#D97706] active:scale-95 transition-all disabled:opacity-50 shrink-0"
+              className="flex h-11 w-11 min-h-[44px] shrink-0 items-center justify-center rounded-full bg-[#F59E0B] text-white active:scale-95 disabled:opacity-50 md:hover:bg-[#D97706]"
               aria-label="Send message"
             >
               <Send size={16} />
