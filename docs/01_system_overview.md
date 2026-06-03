@@ -151,7 +151,7 @@ graph TB
 | `messages` | role, content, optional PDF fields |
 | `uploaded_files` | UUID id, path, `pending` / `processed` / `failed` |
 
-Cascade deletes: user → conversations → messages & files. See [ARCHITECTURE.md §7](./ARCHITECTURE.md#7-database-schema).
+Cascade deletes: user → conversations → messages & files. ER diagram: [02_architecture_diagrams.md §11](./02_architecture_diagrams.md#11-database-er-diagram-schema). Column reference: [ARCHITECTURE.md §7](./ARCHITECTURE.md#7-database-schema).
 
 ---
 

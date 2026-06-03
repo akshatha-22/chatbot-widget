@@ -258,6 +258,76 @@ Desktop expanded: sidebar + chat + files (`md` / `lg` breakpoints).
 
 ---
 
+## 11. Database ER diagram (schema)
+
+SQLAlchemy models in `backend/app/database/db.py`. Tables are created on API startup via `Base.metadata.create_all` in `main.py` (no Alembic migrations in repo). Existing SQLite databases may get PDF columns added by a one-off migration in `main.py` (`has_pdf`, `pdf_content`, `pdf_filename` on `messages`).
+
+**Not stored in the database:** FAISS vector indices and raw upload bytes live on disk under `backend/data/vector_store/` and `backend/data/uploads/`.
+
+```mermaid
+erDiagram
+    users ||--o{ conversations : "owns (CASCADE)"
+    conversations ||--o{ messages : "has (CASCADE)"
+    conversations ||--o{ uploaded_files : "has (CASCADE)"
+
+    users {
+        int id PK "indexed"
+        varchar email UK "255, unique, indexed"
+        varchar hashed_password "255, bcrypt"
+        boolean is_active "default true"
+        datetime created_at "utc default"
+    }
+
+    conversations {
+        int id PK "indexed"
+        varchar title "255, nullable"
+        int user_id FK "NOT NULL, ON DELETE CASCADE"
+        datetime created_at "utc default"
+    }
+
+    messages {
+        int id PK "indexed"
+        int conversation_id FK "NOT NULL, ON DELETE CASCADE"
+        varchar role "50, user or assistant"
+        text content "NOT NULL"
+        boolean has_pdf "default false"
+        text pdf_content "nullable"
+        varchar pdf_filename "255, nullable"
+        datetime created_at "utc default"
+    }
+
+    uploaded_files {
+        varchar id PK "255, UUID string"
+        int conversation_id FK "NOT NULL, ON DELETE CASCADE"
+        varchar filename "255"
+        varchar file_path "500, disk path"
+        varchar status "50, pending | processed | failed"
+        datetime created_at "utc default"
+    }
+```
+
+### Relationship summary
+
+| Parent | Child | FK | On delete | ORM cascade |
+|--------|-------|-----|-----------|-------------|
+| `users` | `conversations` | `conversations.user_id` | **CASCADE** | `all, delete-orphan` on `User.conversations` |
+| `conversations` | `messages` | `messages.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.messages` |
+| `conversations` | `uploaded_files` | `uploaded_files.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.files` |
+
+Deleting a **user** removes all their conversations, messages, and uploaded file rows. Deleting a **conversation** removes its messages and file rows (disk files under `backend/data/uploads/` are not automatically purged by the ORM).
+
+### Client-only data (not in ER diagram)
+
+| Data | Storage |
+|------|---------|
+| JWT session token | `localStorage` (`token`) |
+| Starred conversation IDs | `localStorage` (`starredStorage.ts`) |
+| Archived / Trash folder IDs | `localStorage` (`conversationFoldersStorage.ts`) |
+
+Column-level reference: [ARCHITECTURE.md §7](./ARCHITECTURE.md#7-database-schema).
+
+---
+
 ## Diagram legend
 
 | Symbol | Meaning |
