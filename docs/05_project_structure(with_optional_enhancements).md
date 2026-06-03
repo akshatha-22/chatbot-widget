@@ -16,7 +16,7 @@ chatbot-widget/
 ├── docker/                 # Optional K8s/Docker scaffold (not required to run)
 ├── scripts/                # Setup helpers; some are optional-experiment only
 ├── .github/workflows/      # ci.yml, deploy.yml
-├── package.json            # npm workspaces: client, backend
+├── package.json            # npm workspace root (client package; backend is Python-only)
 ├── package-lock.json
 ├── .env.example            # Template → copy to .env.local at repo root
 ├── vercel.json             # Vercel monorepo build (root)
@@ -40,7 +40,7 @@ client/
 ├── tailwind.config.js
 ├── postcss.config.js
 ├── tsconfig.json
-├── vercel.json             # Client-specific Vercel overrides if used
+├── vercel.json             # Optional; deploy from repo root uses root vercel.json
 ├── public/
 └── src/
     ├── main.tsx            # Entry (not index.tsx)
@@ -172,7 +172,7 @@ backend/
 | Workflow | Trigger | Actions |
 |----------|---------|---------|
 | `ci.yml` | Push/PR `main`, `develop` | Backend pytest, frontend type-check + build |
-| `deploy.yml` | After CI on `main` or manual | Render deploy hook + Vercel production |
+| `deploy.yml` | After CI on `main` or manual | Vercel production (backend deploys on Railway separately) |
 
 ---
 
@@ -198,7 +198,7 @@ scripts/
 └── setup-distributed.sh
 
 docker-compose.yml          # Empty at root
-docker-compose.prod.yml
+docker-compose.prod.yml     # Empty at root
 docker-compose.distributed.yml
 ```
 

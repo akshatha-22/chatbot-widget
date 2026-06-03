@@ -14,7 +14,7 @@ Educational overview of AI techniques used in Remi, with **explicit mapping** to
 2. **Retrieve:** On each user message, embed the query and search up to **5** nearest chunks (L2).  
 3. **Generate:** Prepend chunks to the Gemini prompt under `DOCUMENT CONTEXT`.
 
-```717:743:backend/app/services/chat_service.py
+```717:749:backend/app/services/chat_service.py
 def build_rag_context(db: Session, conversation_id: int, user_message: str) -> str:
     ...
     chunks = vector_store_service.search(file_ids, user_message, top_k=5)

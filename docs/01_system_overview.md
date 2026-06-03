@@ -120,6 +120,9 @@ graph TB
 | `FileUploadModal.tsx` | Drag-and-drop upload |
 | `FileGenerationPanel.tsx` | Summary / report / analysis export |
 | `WidgetConversationDashboard.tsx` | Full conversation table/cards |
+| `AssistantMarkdown.tsx` | Assistant message markdown |
+| `MessageEditModal.tsx` | Edit + resend message |
+| `FloatingWidget.tsx` | Re-export of `index.tsx` for `App.tsx` |
 | `streamSend.ts` | Shared SSE send helper |
 
 ### Backend (`backend/app/`)
@@ -184,7 +187,7 @@ Interactive docs: `http://localhost:8000/docs` when the API is running.
 | Layer | Typical target |
 |-------|----------------|
 | Frontend | **Vercel** (`VITE_API_URL` at build time) |
-| Backend | **Render** (deploy hook in CI) or **Railway** (`backend/Dockerfile`, `railway.toml`) |
+| Backend | **Railway** (`backend/Dockerfile`, `backend/railway.toml`) |
 | Database | Managed PostgreSQL on host platform; SQLite for local dev only |
 
 See [07_deployment_guide.md](./07_deployment_guide.md).
@@ -198,7 +201,8 @@ cp .env.example .env.local   # repo root — set GEMINI_API_KEY
 cd backend && pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
-cd client && npm run dev     # http://127.0.0.1:5173
+npm ci                       # from repo root
+npm run dev                  # http://127.0.0.1:5173 (runs client/)
 ```
 
 Use `DATABASE_URL=sqlite:///./chatbot.db` for local dev without PostgreSQL.

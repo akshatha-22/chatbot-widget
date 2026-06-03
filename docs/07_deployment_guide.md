@@ -14,7 +14,7 @@ How to run and deploy **Remi** using the **actual** stack in this repository.
 | Layer | Typical production | Local dev |
 |-------|-------------------|-----------|
 | Frontend | **Vercel** (static `client/dist`) | Vite `npm run dev` :5173 |
-| Backend | **Render** (CI hook) or **Railway** (Dockerfile) | Uvicorn :8000 |
+| Backend | **Railway** (`backend/Dockerfile`, `railway.toml`) | Uvicorn :8000 |
 | Database | Managed **PostgreSQL** | **SQLite** (`sqlite:///./chatbot.db`) |
 | Vector / uploads | **Local disk** on API server | `backend/data/` |
 
@@ -115,7 +115,7 @@ Deploy from the **repository root** so install sees the workspace `package-lock.
 
 | Variable | Required | Example |
 |----------|----------|---------|
-| `VITE_API_URL` | Yes | `https://your-api.onrender.com` or Railway URL |
+| `VITE_API_URL` | Yes | `https://your-service.up.railway.app` (your Railway public URL) |
 
 Rules:
 
@@ -129,37 +129,33 @@ If deploy fails with too many files, use root `.vercelignore` (already in repo) 
 
 ---
 
-## 5. Production: Backend
+## 5. Production: Backend (Railway)
 
-### 5.1 Render (CI default)
-
-`.github/workflows/deploy.yml` posts to `RENDER_DEPLOY_HOOK` when the secret is set.
-
-On Render:
-
-1. Web service, Docker or Python environment.
-2. Set environment variables (see §7).
-3. Add deploy hook URL to GitHub secret `RENDER_DEPLOY_HOOK`.
-
-### 5.2 Railway (supported in repo)
+The API is deployed on **Railway**, not Render. Connect this repository in the [Railway dashboard](https://railway.app) and set the service root to `backend/` (or deploy using the Dockerfile).
 
 | File | Purpose |
 |------|---------|
 | `backend/Dockerfile` | Production image (CPU torch, `requirements-docker.txt`) |
-| `backend/railway.toml` | Railway config |
-| `backend/railway.toml` / Dockerfile | Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| `backend/railway.toml` | Railway build/deploy config |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 
-Set Railway variables:
+### 5.1 Railway setup
 
-- `DATABASE_URL` (Railway Postgres; `postgres://` auto-normalized to `postgresql://`)
-- `GEMINI_API_KEY`
-- `SECRET_KEY`
-- `CORS_ORIGINS` — your Vercel URL(s)
-- Optional: rely on default `https://.*\.vercel.app` regex for preview apps
+1. Create a Railway project and link this GitHub repo.
+2. Add a **PostgreSQL** plugin (recommended for production).
+3. Set service variables (see §7), including:
+   - `DATABASE_URL` (Railway provides this for Postgres; `postgres://` is auto-normalized to `postgresql://`)
+   - `GEMINI_API_KEY`
+   - `SECRET_KEY` (strong random value)
+   - `CORS_ORIGINS` — your production Vercel URL(s), e.g. `https://remi-zeta-nine.vercel.app`
+4. Deploy; copy the public HTTPS URL (e.g. `https://….up.railway.app`).
+5. Set that URL as `VITE_API_URL` on Vercel and redeploy the frontend.
 
-Point Vercel `VITE_API_URL` to the Railway public URL.
+Optional: default `CORS_ORIGIN_REGEX` in `config.py` already allows `https://.*\.vercel.app` preview deployments.
 
-### 5.3 Persistent disk
+> **Note:** `.github/workflows/deploy.yml` only deploys the **frontend** to Vercel. Backend deploys happen on Railway when you push to the connected branch (or via Railway CLI).
+
+### 5.2 Persistent disk
 
 Uploads and FAISS indices live under `backend/data/`:
 
@@ -226,18 +222,18 @@ On push/PR to `main` / `develop`:
 
 After successful CI on `main`:
 
-1. `curl` Render deploy hook (if configured)
-2. Vercel production deploy with `VITE_API_URL` from secrets
+1. **Frontend:** Vercel production deploy with `VITE_API_URL` from secrets (must point to your **Railway** API URL).
 
-Required GitHub secrets for full deploy:
+**Backend** is **not** deployed by this workflow — Railway deploys from its own GitHub integration or manual deploy.
+
+Required GitHub secrets for frontend deploy:
 
 | Secret | Purpose |
 |--------|---------|
 | `VERCEL_TOKEN` | Vercel CLI |
 | `VERCEL_ORG_ID` | Vercel team |
 | `VERCEL_PROJECT_ID` | Vercel project |
-| `VITE_API_URL` | Production API URL for frontend build |
-| `RENDER_DEPLOY_HOOK` | Optional Render trigger |
+| `VITE_API_URL` | Railway API HTTPS URL for frontend build |
 
 ---
 
@@ -249,7 +245,7 @@ Production errors often look like:
 
 Fix:
 
-1. Add exact Vercel URL to Railway/Render `CORS_ORIGINS`, e.g.  
+1. Add exact Vercel URL to Railway `CORS_ORIGINS`, e.g.  
    `https://remi-zeta-nine.vercel.app`
 2. Include both `localhost` and `127.0.0.1` variants for local dev.
 3. Preview deployments match default regex `https://.*\.vercel.app` unless disabled.
@@ -265,7 +261,7 @@ Fix:
 
 **Not implemented:** Prometheus metrics, structured logging service, Sentry (unless you add it).
 
-Use platform logs (Vercel, Render, Railway) for API errors. Backend prints `[RAG]`, `[EMBED]`, `[FAISS]` diagnostic lines to stdout.
+Use platform logs (Vercel for frontend, Railway for API) for errors. Backend prints `[RAG]`, `[EMBED]`, `[FAISS]` diagnostic lines to stdout.
 
 ---
 
@@ -299,7 +295,7 @@ Horizontal scaling **without shared disk** means each replica has its own FAISS 
 
 ## 13. Optional: Docker (scaffold)
 
-`backend/Dockerfile` is used for Railway-style deploys. Additional files under `docker/` and `docker-compose.prod.yml` are **samples** — not the primary path documented in CI.
+`backend/Dockerfile` is used for Railway deploys. Additional files under `docker/` are **samples** — not the primary path in CI. Root `docker-compose.yml` and `docker-compose.prod.yml` are **empty** placeholders.
 
 To experiment locally with Docker:
 

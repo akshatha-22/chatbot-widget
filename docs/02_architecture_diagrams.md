@@ -80,8 +80,9 @@ flowchart TB
 
     A --> AS
     C --> CS
-    F --> CS
     F --> FP
+    F --> VS
+    F -.->|get_conversation| CS
     CS --> VS
     Routes --> GU
     Routes --> DB
@@ -219,14 +220,14 @@ flowchart LR
     CI[GitHub Actions CI]
     Deploy[Deploy workflow]
     Vercel[Vercel static client]
-    Render[Render or Railway API]
+    Railway[Railway API]
     PG[(PostgreSQL)]
 
     Dev --> CI --> Deploy
     Deploy --> Vercel
-    Deploy --> Render
-    Render --> PG
-    Vercel -->|VITE_API_URL HTTPS| Render
+    Dev -->|Railway Git integration| Railway
+    Railway --> PG
+    Vercel -->|VITE_API_URL HTTPS| Railway
 ```
 
 Optional scaffold under `docker/kubernetes/` is **not** the primary documented path.

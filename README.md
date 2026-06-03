@@ -72,7 +72,7 @@ There is **no** LangChain, Redis, Celery, WebSocket server, Kubernetes runtime, 
 | Tool | Purpose |
 | --- | --- |
 | GitHub Actions (`.github/workflows/ci.yml`) | pytest + frontend type-check/build on `main` / `develop` |
-| GitHub Actions (`.github/workflows/deploy.yml`) | Render backend hook + Vercel frontend (secrets optional) |
+| GitHub Actions (`.github/workflows/deploy.yml`) | Vercel frontend deploy (backend deploys on **Railway**, not via this workflow) |
 
 ---
 
@@ -210,6 +210,15 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | **Message edit & resend** | `MessageEditModal` → `POST …/messages` |
 | **Conversation dashboard** | `WidgetConversationDashboard` + `SearchFilterPanel` |
 | **Starred conversations** | `localStorage` via `starredStorage.ts` |
+| **Archived / Trash** | `localStorage` via `conversationFoldersStorage.ts` (client-only) |
+
+### Mobile (viewport < 768px)
+
+| Feature | Implementation |
+| --- | --- |
+| **Responsive layout** | `useIsMobile.ts` + `ExpandedWidget` full-screen + bottom tabs |
+| **Mobile tabs** | `MobileTabBar.tsx` — Chat / Chats / Files |
+| **Mobile lists** | `MobileConversationList.tsx`, `MobileFilesPanel.tsx` |
 
 ### Files & RAG
 
@@ -245,19 +254,20 @@ chatbot-widget/
 ├── .env.example / .env.local       # Shared env (repo root; Vite envDir + backend config)
 ├── .github/workflows/
 │   ├── ci.yml                       # pytest + type-check + build
-│   └── deploy.yml                   # Render + Vercel
+│   └── deploy.yml                   # Vercel production (backend on Railway)
 ├── client/                          # React widget (Vite)
 │   ├── index.html
 │   ├── vite.config.ts
 │   └── src/
 │       ├── main.tsx                 # Entry
-│       ├── App.tsx                  # Renders ChatbotWidget only
+│       ├── App.tsx                  # Imports default export from FloatingWidget.tsx
 │       ├── api/                     # auth.ts, chat.ts, files.ts, client.ts
 │       ├── components/
-│       │   ├── ChatbotWidget/       # All widget UI (14 components)
+│       │   ├── ChatbotWidget/       # 17 UI modules + streamSend.ts
 │       │   └── SearchFilterPanel.tsx
+│       ├── hooks/useIsMobile.ts
 │       ├── types/index.ts
-│       ├── utils/                   # pdfGenerator, exportConversation, starredStorage, …
+│       ├── utils/                   # pdfGenerator, exportConversation, starredStorage, conversationFoldersStorage, …
 │       └── styles/                  # index.css, animations.css
 ├── backend/
 │   ├── app/
@@ -293,6 +303,7 @@ chatbot-widget/
 | `FileUploadModal.tsx` | Drag-and-drop file upload |
 | `FileGenerationPanel.tsx` | AI summary/report/analysis + client exports |
 | `WidgetConversationDashboard.tsx` | Browse and search conversations |
+| `MobileTabBar.tsx` / `MobileConversationList.tsx` / `MobileFilesPanel.tsx` | Mobile expanded layout |
 | `streamSend.ts` | Shared SSE streaming helper for compact & expanded widgets |
 
 ---
@@ -307,7 +318,7 @@ chatbot-widget/
 | [03_features_capabilities.md](docs/03_features_capabilities.md) | Shipped features vs not implemented |
 | [04_ml_ai_concepts.md](docs/04_ml_ai_concepts.md) | RAG/LLM concepts mapped to this repo |
 | [05_project_structure(with_optional_enhancements).md](docs/05_project_structure(with_optional_enhancements).md) | Directory layout |
-| [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel, Render/Railway |
+| [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
 
 ---
 
@@ -431,19 +442,19 @@ Triggers on push/PR to `main` and `develop`.
 
 ## Deployment
 
-`.github/workflows/deploy.yml` runs after CI succeeds on `main` (or manually via workflow dispatch).
+`.github/workflows/deploy.yml` runs after CI succeeds on `main` (or manually via workflow dispatch) and deploys the **frontend** to Vercel. The **backend** is deployed separately on **Railway** (see `backend/Dockerfile`, `backend/railway.toml`).
 
-| Target | Mechanism | Secret |
+| Target | Mechanism | Secret / config |
 | --- | --- | --- |
-| **Backend** | Render deploy hook | `RENDER_DEPLOY_HOOK` |
+| **Backend** | **Railway** (GitHub-connected service or `railway up`) | `DATABASE_URL`, `GEMINI_API_KEY`, `SECRET_KEY`, `CORS_ORIGINS` in Railway dashboard |
 | **Frontend** | Vercel CLI (`vercel build` + `vercel deploy --prebuilt`) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_URL` |
 
-If secrets are not set, the corresponding deploy step is skipped gracefully.
+If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 
 ### Production notes
 
-- Set `SECRET_KEY`, `GEMINI_API_KEY`, and `DATABASE_URL` (PostgreSQL recommended) on Render.
-- Set `VITE_API_URL` to your Render API URL on Vercel.
+- Set `SECRET_KEY`, `GEMINI_API_KEY`, and `DATABASE_URL` (PostgreSQL recommended) on **Railway**.
+- Set `VITE_API_URL` to your **Railway** public API URL on Vercel (e.g. `https://your-service.up.railway.app`).
 - Add your Vercel domain to `CORS_ORIGINS` on the backend.
 - FAISS indices and uploads are stored on local disk (`backend/data/`). Ephemeral filesystems (some free tiers) will lose RAG indexes on redeploy — use persistent disk or external storage for production RAG.
 
