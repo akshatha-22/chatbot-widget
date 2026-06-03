@@ -1,509 +1,266 @@
-# 02_architecture_diagrams
+# Architecture Diagrams
 
-This document provides comprehensive visual representations of the chatbot widget system architecture at multiple levels of abstraction.
+Mermaid diagrams aligned with the **running codebase** (`client/` + `backend/app/`). Details: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ---
 
-## 1. System Context Diagram
-
-The system context diagram shows how the chatbot widget interacts with external systems and users.
+## 1. System context
 
 ```mermaid
-graph TB
-    User["👤 End User"]
-    Website["🌐 Website Host"]
-    Widget["💬 Chatbot Widget"]
-    Backend["🖥️ Backend API"]
-    LLM["🤖 LLM Service<br/>(OpenAI/Anthropic)"]
-    DB["🗄️ Database<br/>(PostgreSQL)"]
-    Storage["📦 File Storage<br/>(S3/Local)"]
+flowchart LR
+    User[Website visitor]
+    Widget[Remi React widget]
+    API[FastAPI API]
+    Gemini[Google Gemini API]
+    OpenAI[OpenAI API optional]
+    DB[(SQLite or PostgreSQL)]
 
-    User -->|Interacts| Widget
-    Website -->|Embeds| Widget
-    Widget -->|API Calls| Backend
-    Backend -->|Query| LLM
-    Backend -->|Read/Write| DB
-    Backend -->|Upload/Download| Storage
-    LLM -->|Generate Response| Backend
+    User --> Widget
+    Widget -->|HTTPS REST + SSE| API
+    API --> Gemini
+    API -.->|fallback| OpenAI
+    API --> DB
+    API --> Disk[Local uploads + FAISS]
 ```
 
 ---
 
-## 2. High-Level Architecture (HLA)
-
-The HLA shows the major layers and components of the system.
+## 2. Frontend component flow
 
 ```mermaid
-graph TB
-    subgraph Presentation["Presentation Layer"]
-        A["React Widget<br/>(Chat Interface)"]
-        B["Dashboard<br/>(Conversation History)"]
+flowchart TB
+    App[App.tsx]
+    FW[FloatingWidget.tsx]
+    CW[ChatbotWidget index.tsx]
+    RL[RemiLauncher]
+    Auth[WidgetAuthPanel]
+    Compact[CompactWidget]
+    Expanded[ExpandedWidget]
+
+    App --> FW --> CW
+    CW -->|closed| RL
+    CW -->|no user| Auth
+    CW -->|logged in compact| Compact
+    CW -->|logged in expanded| Expanded
+
+    Expanded --> MI[ChatInterface]
+    Expanded --> MCL[MobileConversationList]
+    Expanded --> MFP[MobileFilesPanel]
+    Expanded --> MTB[MobileTabBar]
+    Compact --> SS[streamSend.ts]
+    Expanded --> SS
+    SS --> API[api/chat.ts fetch SSE]
+```
+
+**State owner:** `ChatbotWidget/index.tsx` holds `messages`, `files`, `activeConversation`, `conversations`, folder IDs (`starred`, `archived`, `trash` in localStorage).
+
+---
+
+## 3. Backend request layers
+
+```mermaid
+flowchart TB
+    subgraph Routes["api/v1"]
+        A[auth.py]
+        C[chat.py]
+        F[files.py]
     end
 
-    subgraph Application["Application Layer"]
-        C["FastAPI Server"]
-        D["Request Router"]
-        E["Authentication Service"]
+    subgraph Deps["Dependencies"]
+        GU[get_current_user JWT]
+        DB[get_db Session]
     end
 
-    subgraph Business["Business Logic Layer"]
-        F["Chat Service"]
-        G["File Processing Service"]
-        H["LLM Orchestrator"]
-        I["Vector Store Manager"]
+    subgraph Services["services/"]
+        AS[auth_service]
+        CS[chat_service]
+        FP[file_parser_service]
+        VS[vector_store_service]
     end
 
-    subgraph Data["Data Layer"]
-        J["PostgreSQL Database"]
-        K["FAISS Vector Store"]
-        L["File Storage<br/>(S3/Local)"]
-    end
-
-    subgraph External["External Services"]
-        M["OpenAI API"]
-        N["Anthropic API"]
-    end
-
-    A --> D
-    B --> D
-    D --> E
-    E --> F
-    E --> G
-    F --> H
-    G --> I
-    H --> M
-    H --> N
-    F --> J
-    G --> K
-    G --> L
-    I --> K
+    A --> AS
+    C --> CS
+    F --> CS
+    F --> FP
+    CS --> VS
+    Routes --> GU
+    Routes --> DB
 ```
 
 ---
 
-## 3. Component Architecture
-
-This diagram shows the internal structure of the backend system.
-
-```mermaid
-graph LR
-    subgraph Frontend["Frontend (React)"]
-        FE1["Chat Component"]
-        FE2["File Upload"]
-        FE3["Message Editor"]
-        FE4["Dashboard"]
-    end
-
-    subgraph API["FastAPI Backend"]
-        API1["Route Handlers"]
-        API2["Middleware<br/>(Auth, CORS)"]
-        API3["Request Validators"]
-    end
-
-    subgraph Services["Business Services"]
-        SVC1["Chat Service"]
-        SVC2["File Service"]
-        SVC3["User Service"]
-        SVC4["Conversation Service"]
-    end
-
-    subgraph Processing["Processing Layer"]
-        PROC1["LLM Orchestrator<br/>(LangChain)"]
-        PROC2["File Parser"]
-        PROC3["Embedding Generator"]
-        PROC4["Vector Store Manager"]
-    end
-
-    subgraph Storage["Storage Layer"]
-        STOR1["PostgreSQL"]
-        STOR2["FAISS"]
-        STOR3["File Storage"]
-    end
-
-    FE1 --> API1
-    FE2 --> API1
-    FE3 --> API1
-    FE4 --> API1
-    API1 --> API2
-    API2 --> API3
-    API3 --> SVC1
-    API3 --> SVC2
-    API3 --> SVC3
-    API3 --> SVC4
-    SVC1 --> PROC1
-    SVC2 --> PROC2
-    SVC2 --> PROC3
-    PROC3 --> PROC4
-    PROC1 --> STOR1
-    PROC4 --> STOR2
-    SVC2 --> STOR3
-```
-
----
-
-## 4. Data Flow Diagram (DFD)
-
-The DFD illustrates how data flows through the system during a typical chat interaction.
-
-```mermaid
-graph TD
-    A["User Input<br/>(Message/File)"]
-    B["Widget<br/>(Frontend)"]
-    C["API Gateway"]
-    D{Request Type?}
-    E["Chat Handler"]
-    F["File Handler"]
-    G["LLM Service"]
-    H["Vector Store"]
-    I["Database"]
-    J["Response Generator"]
-    K["Widget Display"]
-    L["User Output"]
-
-    A --> B
-    B --> C
-    C --> D
-    D -->|Chat| E
-    D -->|File| F
-    E --> G
-    F --> H
-    G --> I
-    H --> I
-    I --> J
-    G --> J
-    J --> K
-    K --> L
-```
-
----
-
-## 5. Deployment Architecture
-
-This diagram shows how the system is deployed in production.
-
-```mermaid
-graph TB
-    subgraph Client["Client Layer"]
-        CL["Website with<br/>Embedded Widget"]
-    end
-
-    subgraph CDN["CDN Layer"]
-        CDN1["Widget JS Bundle<br/>(Cached)"]
-    end
-
-    subgraph LB["Load Balancer"]
-        LB1["Nginx<br/>(SSL Termination)"]
-    end
-
-    subgraph Servers["Application Servers"]
-        SRV1["FastAPI Instance 1"]
-        SRV2["FastAPI Instance 2"]
-        SRV3["FastAPI Instance N"]
-    end
-
-    subgraph Cache["Cache Layer"]
-        CACHE["Redis<br/>(Session Cache)"]
-    end
-
-    subgraph Database["Database Layer"]
-        DB1["PostgreSQL Primary"]
-        DB2["PostgreSQL Replica"]
-    end
-
-    subgraph Storage["Storage Layer"]
-        S3["AWS S3<br/>(File Storage)"]
-    end
-
-    subgraph External["External Services"]
-        EXT1["OpenAI API"]
-        EXT2["Anthropic API"]
-    end
-
-    CL --> CDN1
-    CL --> LB1
-    LB1 --> SRV1
-    LB1 --> SRV2
-    LB1 --> SRV3
-    SRV1 --> CACHE
-    SRV2 --> CACHE
-    SRV3 --> CACHE
-    SRV1 --> DB1
-    SRV2 --> DB1
-    SRV3 --> DB1
-    DB1 --> DB2
-    SRV1 --> S3
-    SRV2 --> S3
-    SRV3 --> S3
-    SRV1 --> EXT1
-    SRV2 --> EXT2
-    SRV3 --> EXT1
-```
-
----
-
-## 6. Widget Integration Architecture
-
-This diagram shows how the widget integrates into an existing website.
-
-```mermaid
-graph TB
-    subgraph Website["Existing Website"]
-        WEB["Website HTML/CSS/JS"]
-        SCRIPT["Widget Script<br/>(Injected)"]
-    end
-
-    subgraph Widget["Chatbot Widget"]
-        WIDGET_CONTAINER["Widget Container<br/>(Shadow DOM)"]
-        WIDGET_UI["Chat UI<br/>(React)"]
-        WIDGET_STATE["State Manager<br/>(Zustand)"]
-    end
-
-    subgraph Backend["Backend Server"]
-        API["FastAPI<br/>API Server"]
-    end
-
-    WEB -->|Includes| SCRIPT
-    SCRIPT -->|Mounts| WIDGET_CONTAINER
-    WIDGET_CONTAINER --> WIDGET_UI
-    WIDGET_UI --> WIDGET_STATE
-    WIDGET_STATE -->|HTTP/WebSocket| API
-```
-
----
-
-## 7. Message Flow Sequence Diagram
-
-This diagram shows the sequence of interactions when a user sends a message.
+## 4. Chat message sequence (SSE)
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Widget as Widget<br/>(React)
-    participant API as Backend<br/>(FastAPI)
-    participant LLM as LLM<br/>(OpenAI)
-    participant DB as Database<br/>(PostgreSQL)
+    participant U as User
+    participant W as streamSend.ts
+    participant API as chat.ts fetch
+    participant R as POST .../messages/stream
+    participant S as chat_service
 
-    User->>Widget: Types message
-    User->>Widget: Clicks Send
-    Widget->>Widget: Validate message
-    Widget->>Widget: Store in local state
-    Widget->>API: POST /api/chat<br/>(user_id, message, session_id)
-    API->>API: Authenticate request
-    API->>DB: Fetch conversation context
-    DB->>API: Return context
-    API->>LLM: Generate response<br/>(with context)
-    LLM->>API: Return response
-    API->>DB: Store message & response
-    API->>Widget: Return response<br/>(JSON)
-    Widget->>Widget: Update chat state
-    Widget->>User: Display response
+    U->>W: Send message
+    W->>W: Optimistic user msg + placeholder assistant
+    W->>API: POST stream + Bearer token
+    API->>R: JSON body content
+    R->>S: create_message user
+    R->>S: stream_and_save_assistant
+    loop chunks
+        S-->>API: data: token\n\n
+        API-->>W: onChunk
+    end
+    S->>S: create_message assistant
+    S-->>API: data: {"event":"done",...}\n\n
+    API-->>W: onDone
 ```
+
+**Note:** There is no WebSocket; streaming uses **HTTP SSE** (`text/event-stream`).
 
 ---
 
-## 8. File Upload and Processing Flow
-
-This diagram shows the detailed flow when a user uploads a file.
+## 5. File upload and embedding
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Widget as Widget<br/>(React)
-    participant API as Backend<br/>(FastAPI)
-    participant Parser as File Parser
-    participant Embedder as Embedding<br/>Service
-    participant VectorDB as Vector Store<br/>(FAISS)
-    participant DB as Database
+    participant W as FileUploadModal
+    participant API as files.ts
+    participant R as POST .../files
+    participant BG as daemon Thread
+    participant E as process_file_embedding
 
-    User->>Widget: Selects file
-    Widget->>Widget: Validate file type & size
-    Widget->>API: POST /api/upload<br/>(file, user_id)
-    API->>Parser: Parse file<br/>(PDF/TXT/DOCX)
-    Parser->>Parser: Extract text
-    Parser->>Parser: Split into chunks
-    Parser->>Embedder: Generate embeddings<br/>for each chunk
-    Embedder->>VectorDB: Store embeddings<br/>+ chunk text
-    VectorDB->>API: Confirm storage
-    API->>DB: Store file metadata
-    DB->>API: Confirm storage
-    API->>Widget: Return success<br/>(file_id)
-    Widget->>User: Display upload success
+    W->>API: multipart upload
+    API->>R: FormData file
+    R->>R: Save disk pending commit
+    R-->>W: status pending
+    R->>BG: BackgroundTasks
+    BG->>E: extract_text chunk_and_store
+    E->>E: FAISS .index + .chunks
+    E->>E: status processed commit
+    W->>W: Poll listFiles every 3s
 ```
 
 ---
 
-## 9. Edit Message Feature Flow
-
-This diagram shows how the edit message feature works.
+## 6. RAG at query time
 
 ```mermaid
-graph TD
-    A["User Types Message"]
-    B["Message in Input Field"]
-    C{User Action?}
-    D["User Clicks Send"]
-    E["User Clicks Edit"]
-    F["Message Sent to Backend"]
-    G["Enable Inline Editing"]
-    H["User Modifies Text"]
-    I["User Confirms Edit"]
-    J["Updated Message Ready"]
-    K["Send to Backend"]
+flowchart LR
+    Q[User message]
+    BF[build_rag_context]
+    DB[(uploaded_files processed)]
+    FAISS[FAISS search top_k=5]
+    P[Gemini prompt DOCUMENT CONTEXT]
+    G[Gemini stream]
 
-    A --> B
-    B --> C
-    C -->|Send| D
-    C -->|Edit| E
-    D --> F
-    E --> G
-    G --> H
-    H --> I
-    I --> J
-    J --> K
+    Q --> BF
+    BF --> DB
+    BF --> FAISS
+    FAISS --> P
+    P --> G
 ```
 
 ---
 
-## 10. Dashboard Architecture
-
-This diagram shows the structure of the conversation dashboard.
+## 7. LLM fallback chain
 
 ```mermaid
-graph TB
-    subgraph Dashboard["Dashboard Component"]
-        D1["Conversation List"]
-        D2["Search & Filter"]
-        D3["Conversation Detail"]
-        D4["Export Options"]
-    end
+flowchart TD
+    Start[Assistant reply needed]
+    PDF{detect_pdf_request?}
+    PDFPath[PDF markdown message]
+    Gemini{GEMINI_API_KEY set?}
+    GStream[Stream Gemini models + optional Search]
+    OpenAI{OPENAI_API_KEY set?}
+    OAI[OpenAI chat completion]
+    FB[Rule-based fallback + RAG excerpt]
 
-    subgraph Backend["Backend API"]
-        API1["GET /conversations"]
-        API2["GET /conversations/{id}"]
-        API3["DELETE /conversations/{id}"]
-        API4["GET /conversations/search"]
-    end
-
-    subgraph Database["Database"]
-        DB1["Conversations Table"]
-        DB2["Messages Table"]
-        DB3["Files Table"]
-    end
-
-    D1 --> API1
-    D2 --> API4
-    D3 --> API2
-    D4 --> API3
-    API1 --> DB1
-    API2 --> DB2
-    API4 --> DB1
-    API3 --> DB1
-    DB1 --> DB3
+    Start --> PDF
+    PDF -->|yes| PDFPath
+    PDF -->|no| Gemini
+    Gemini -->|yes| GStream
+    GStream -->|no output| OpenAI
+    Gemini -->|no| OpenAI
+    OpenAI -->|yes| OAI
+    OpenAI -->|no| FB
+    GStream -->|success| Done[Persist message]
+    OAI --> Done
+    FB --> Done
+    PDFPath --> Done
 ```
 
 ---
 
-## 11. Security Architecture
-
-This diagram shows the security layers in the system.
+## 8. Authentication flow
 
 ```mermaid
-graph TB
-    subgraph Client["Client Layer"]
-        C1["HTTPS Only"]
-        C2["CSP Headers"]
-    end
+sequenceDiagram
+    participant W as WidgetAuthPanel
+    participant A as api/auth.ts
+    participant R as POST /auth/login
+    participant LS as localStorage
 
-    subgraph Network["Network Layer"]
-        N1["Nginx<br/>(SSL/TLS)"]
-        N2["Rate Limiting"]
-        N3["DDoS Protection"]
-    end
-
-    subgraph API["API Layer"]
-        A1["JWT Authentication"]
-        A2["CORS Policy"]
-        A3["Input Validation"]
-    end
-
-    subgraph Application["Application Layer"]
-        APP1["Authorization<br/>(RBAC)"]
-        APP2["Audit Logging"]
-        APP3["Data Encryption"]
-    end
-
-    subgraph Database["Database Layer"]
-        DB1["Row-Level Security"]
-        DB2["Encrypted Passwords"]
-        DB3["Audit Trail"]
-    end
-
-    C1 --> N1
-    C2 --> N1
-    N1 --> N2
-    N2 --> N3
-    N3 --> A1
-    A1 --> A2
-    A2 --> A3
-    A3 --> APP1
-    APP1 --> APP2
-    APP2 --> APP3
-    APP3 --> DB1
-    DB1 --> DB2
-    DB2 --> DB3
+    W->>A: email password
+    A->>R: JSON credentials
+    R-->>A: access_token
+    A->>LS: token
+    W->>A: GET /auth/me Bearer
+    A-->>W: User profile
 ```
+
+Subsequent requests: Axios interceptor and `fetch` add `Authorization: Bearer <token>`.
 
 ---
 
-## 12. Scalability Architecture
-
-This diagram shows how the system scales horizontally.
+## 9. Deployment topology (typical)
 
 ```mermaid
-graph TB
-    subgraph Users["Users"]
-        U1["User 1"]
-        U2["User 2"]
-        UN["User N"]
-    end
+flowchart LR
+    Dev[Developer push main]
+    CI[GitHub Actions CI]
+    Deploy[Deploy workflow]
+    Vercel[Vercel static client]
+    Render[Render or Railway API]
+    PG[(PostgreSQL)]
 
-    subgraph LB["Load Balancer"]
-        LB1["Nginx<br/>(Round Robin)"]
-    end
-
-    subgraph Servers["Application Servers<br/>(Auto-scaling)"]
-        S1["FastAPI Pod 1"]
-        S2["FastAPI Pod 2"]
-        S3["FastAPI Pod N"]
-    end
-
-    subgraph Cache["Cache Layer"]
-        REDIS["Redis Cluster"]
-    end
-
-    subgraph DB["Database Layer"]
-        PG["PostgreSQL<br/>(Replication)"]
-    end
-
-    subgraph Queue["Message Queue"]
-        QUEUE["RabbitMQ<br/>(Async Tasks)"]
-    end
-
-    U1 --> LB1
-    U2 --> LB1
-    UN --> LB1
-    LB1 --> S1
-    LB1 --> S2
-    LB1 --> S3
-    S1 --> REDIS
-    S2 --> REDIS
-    S3 --> REDIS
-    S1 --> PG
-    S2 --> PG
-    S3 --> PG
-    S1 --> QUEUE
-    S2 --> QUEUE
-    S3 --> QUEUE
+    Dev --> CI --> Deploy
+    Deploy --> Vercel
+    Deploy --> Render
+    Render --> PG
+    Vercel -->|VITE_API_URL HTTPS| Render
 ```
 
-These architecture diagrams provide a comprehensive visual representation of the chatbot widget system at various levels of abstraction, from high-level system context to detailed component interactions.
+Optional scaffold under `docker/kubernetes/` is **not** the primary documented path.
+
+---
+
+## 10. Mobile expanded layout
+
+```mermaid
+flowchart TB
+    subgraph Mobile["Viewport under 768px"]
+        Nav[Header menu back collapse close]
+        Tabs[MobileTabBar]
+        P1[Chat tab ChatInterface]
+        P2[Chats tab MobileConversationList]
+        P3[Files tab MobileFilesPanel]
+    end
+
+    Nav --> P1
+    Nav --> P2
+    Nav --> P3
+    Tabs --> P1
+    Tabs --> P2
+    Tabs --> P3
+```
+
+Desktop expanded: sidebar + chat + files (`md` / `lg` breakpoints).
+
+---
+
+## Diagram legend
+
+| Symbol | Meaning |
+|--------|---------|
+| Solid arrow | Implemented today |
+| Dotted arrow | Optional / fallback path |
+| No Redis / RabbitMQ / LangChain | Not in runtime code |

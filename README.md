@@ -1,5 +1,4 @@
 # Remi — AI Chatbot Widget
-**Live demo:** https://remi-zeta-nine.vercel.app
 
 A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI assistant. Users sign in inside the widget, chat with streaming responses, upload documents for RAG-backed answers, export conversations, and generate PDFs—either from the Generate panel or directly in chat with natural language.
 
@@ -38,7 +37,7 @@ There is **no** LangChain, Redis, Celery, WebSocket server, Kubernetes runtime, 
 
 ---
 
-## Tech Stack 
+## Tech Stack (Actual)
 
 ### Frontend (`client/`)
 
@@ -115,6 +114,7 @@ cd backend
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Terminal 2 — Widget (from repo root)
+cd client
 npm run dev
 # Open http://127.0.0.1:5173
 ```
@@ -126,6 +126,10 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 ---
 
 ## Architecture
+
+**Deep-dive (code-level):** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — request lifecycle, RAG, SSE, auth, schema, security, tests, and known gaps with file/line references.
+
+**Diagrams & overview:** [docs/01_system_overview.md](docs/01_system_overview.md) · [docs/02_architecture_diagrams.md](docs/02_architecture_diagrams.md)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -293,6 +297,20 @@ chatbot-widget/
 
 ---
 
+## Documentation (`docs/`)
+
+| Doc | Contents |
+| --- | --- |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Code-level reference (lifecycle, RAG, auth, security, tests) |
+| [01_system_overview.md](docs/01_system_overview.md) | System summary and workflows |
+| [02_architecture_diagrams.md](docs/02_architecture_diagrams.md) | Mermaid diagrams |
+| [03_features_capabilities.md](docs/03_features_capabilities.md) | Shipped features vs not implemented |
+| [04_ml_ai_concepts.md](docs/04_ml_ai_concepts.md) | RAG/LLM concepts mapped to this repo |
+| [05_project_structure(with_optional_enhancements).md](docs/05_project_structure(with_optional_enhancements).md) | Directory layout |
+| [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel, Render/Railway |
+
+---
+
 ## Environment Variables
 
 Copy `.env.example` → `.env.local` at the **repo root**. Both backend (`config.py` + `python-dotenv`) and Vite (`envDir: '..'` in `vite.config.ts`) read from there.
@@ -453,5 +471,5 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Last updated:** June 2026  
+**Last updated:** May 2026  
 **Status:** Production-oriented widget with chat, RAG, PDF generation, and CI/CD. Codebase trimmed to live runtime paths only.

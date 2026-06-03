@@ -1,479 +1,217 @@
-# 01_system_overview
+# System Overview
 
-## Executive Summary
-
-The AI Chatbot Widget is a sophisticated, embeddable solution designed for integration into existing websites. It provides users with a dual-purpose conversational interface: a general-purpose AI assistant and a file-based document analysis tool. The system supports real-time conversations, file uploads, document-specific queries, file generation, conversation history management, and an intuitive dashboard for reviewing past interactions.
+Executive summary of **Remi** — the embeddable AI chatbot widget in this monorepo. For code-level detail (lifecycle, RAG, auth, security), see [ARCHITECTURE.md](./ARCHITECTURE.md). For diagrams, see [02_architecture_diagrams.md](./02_architecture_diagrams.md).
 
 ---
 
-## 1. System Architecture Overview
+## What the system is
 
-### 1.1. High-Level Architecture (HLA)
+Remi is a **self-contained React widget** plus a **FastAPI API** that provides:
 
-The chatbot widget system follows a three-tier architecture: frontend (widget), backend (API server), and data layer (database).
+- In-widget **signup / login** (JWT)
+- **Streaming chat** (Server-Sent Events) powered primarily by **Google Gemini**
+- **Document Q&A** via local **FAISS** + **sentence-transformers** (RAG)
+- **File upload** (PDF, DOCX, XLSX, plain text) with background embedding
+- **PDF generation** from chat intent or the Generate panel
+- **Conversation history**, dashboard search/filter UI, and **mobile-responsive** expanded layout
+
+There is **no** LangChain, Redis, Celery, WebSocket server, or moderation pipeline in the running application.
+
+---
+
+## High-level architecture
 
 ```mermaid
 graph TB
-    subgraph Client["Client (Website)"]
-        A["Website Host"]
-        B["Chatbot Widget<br/>(React Component)"]
-        A --> B
+    subgraph Browser["Browser"]
+        W["React widget client/"]
+        LS["localStorage: token, starred, archived, trash"]
+        W --> LS
     end
 
-    subgraph Server["Backend Server"]
-        C["FastAPI Server"]
-        D["LLM Orchestrator<br/>(LangChain)"]
-        E["File Handler"]
-        F["Vector Store<br/>(FAISS)"]
+    subgraph API["FastAPI backend/app/"]
+        AUTH["/api/v1/auth"]
+        CHAT["/api/v1/chat"]
+        FILES["/api/v1/chat/.../files"]
+        CS["chat_service.py"]
+        VS["vector_store_service.py"]
+        AUTH --> CHAT
+        CHAT --> CS
+        FILES --> VS
     end
 
-    subgraph Data["Data Layer"]
-        G["PostgreSQL Database"]
-        H["File Storage<br/>(S3/Local)"]
+    subgraph Data["Data layer"]
+        DB["SQLite or PostgreSQL"]
+        DISK["backend/data/uploads + vector_store/"]
     end
 
-    B -->|HTTP/WebSocket| C
-    C --> D
-    C --> E
-    C --> F
-    D -->|Query| G
-    E -->|Store/Retrieve| H
-    F -->|Embeddings| G
-```
-
-### 1.2. Component Breakdown
-
-| Component | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Frontend Widget** | React + TypeScript | Embeddable chat interface with file upload and edit capabilities. |
-| **Backend API** | FastAPI (Python) | REST API for chat, file processing, and conversation management. |
-| **LLM Integration** | LangChain + OpenAI/Anthropic | Conversational AI and document analysis. |
-| **Vector Store** | FAISS | Efficient similarity search for document retrieval. |
-| **Database** | PostgreSQL | Persistent storage for conversations, users, and metadata. |
-| **File Storage** | AWS S3 or Local | Storage for uploaded files and generated outputs. |
-
----
-
-## 2. System Workflow
-
-### 2.1. General Chat Flow
-
-The user initiates a conversation with the chatbot widget, which sends the query to the backend API. The backend processes the query using the LLM and returns a response.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Widget as Chatbot Widget
-    participant API as FastAPI Backend
-    participant LLM as LLM (OpenAI/Anthropic)
-    participant DB as Database
-
-    User->>Widget: Types message
-    Widget->>Widget: User can edit message before sending
-    User->>Widget: Clicks Send
-    Widget->>API: POST /chat (user_id, message, session_id)
-    API->>LLM: Process query with context
-    LLM->>API: Return response
-    API->>DB: Store conversation
-    API->>Widget: Return response
-    Widget->>User: Display response in chat
-```
-
-### 2.2. File Upload and Document Analysis Flow
-
-When a user uploads a file, the system processes it, generates embeddings, and stores them for future retrieval.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Widget as Chatbot Widget
-    participant API as FastAPI Backend
-    participant Processor as File Processor
-    participant Embedder as Embedding Model
-    participant VectorStore as Vector Store
-    participant DB as Database
-
-    User->>Widget: Uploads file
-    Widget->>API: POST /upload (file, user_id, session_id)
-    API->>Processor: Parse file (PDF/TXT/DOCX)
-    Processor->>Processor: Split into chunks
-    Processor->>Embedder: Generate embeddings
-    Embedder->>VectorStore: Store embeddings + chunks
-    VectorStore->>DB: Save file metadata
-    API->>Widget: Return success + file_id
-    Widget->>User: Display file uploaded notification
-```
-
-### 2.3. File-Based Query Flow
-
-When the user asks a question about an uploaded file, the system retrieves relevant context from the vector store and generates a response.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Widget as Chatbot Widget
-    participant API as FastAPI Backend
-    participant VectorStore as Vector Store
-    participant LLM as LLM
-    participant DB as Database
-
-    User->>Widget: Asks question about file
-    Widget->>API: POST /chat (message, file_id, session_id)
-    API->>VectorStore: Retrieve relevant chunks
-    VectorStore->>API: Return context
-    API->>LLM: Generate response with context
-    LLM->>API: Return response
-    API->>DB: Store conversation with file reference
-    API->>Widget: Return response
-    Widget->>User: Display response
-```
-
-### 2.4. Edit Chat Feature Flow
-
-The user can edit their message before sending it to the backend.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Widget as Chatbot Widget
-
-    User->>Widget: Types message
-    Widget->>Widget: Message appears in input field
-    User->>Widget: Clicks Edit button (or message is not sent yet)
-    Widget->>Widget: Allows inline editing
-    User->>Widget: Modifies text
-    User->>Widget: Clicks Send
-    Widget->>Widget: Validates message
-    Widget->>Widget: Sends to backend
-```
-
----
-
-## 3. User Stories and Use Cases
-
-### 3.1. Epic 1: General AI Assistance
-
-**User Story 1.1**: As a website visitor, I want to click on a chat widget and ask general questions so that I can get quick answers without leaving the website.
-
-**User Story 1.2**: As a user, I want to see my conversation history in a dashboard so that I can review previous interactions.
-
-**User Story 1.3**: As a user, I want to edit my message before sending it so that I can correct typos or rephrase my question.
-
-### 3.2. Epic 2: File-Based Document Analysis
-
-**User Story 2.1**: As a user, I want to upload a document (PDF, TXT, DOCX) so that I can ask questions specific to that document.
-
-**User Story 2.2**: As a user, I want the chatbot to answer questions based only on the uploaded document content so that I receive accurate, grounded responses.
-
-**User Story 2.3**: As a user, I want to upload multiple files in a single session so that I can compare or analyze multiple documents.
-
-### 3.3. Epic 3: File Generation and Export
-
-**User Story 3.1**: As a user, I want to request the chatbot to generate a summary or report so that I can download it as a file.
-
-**User Story 3.2**: As a user, I want to export my conversation as a text or PDF file so that I can save or share it.
-
-### 3.4. Epic 4: Dashboard and History Management
-
-**User Story 4.1**: As a user, I want to view all my past conversations in a dashboard so that I can quickly find and resume previous discussions.
-
-**User Story 4.2**: As a user, I want to search my conversation history so that I can find specific topics or files I discussed.
-
-**User Story 4.3**: As a user, I want to delete conversations so that I can manage my data and privacy.
-
-### 3.5. Use Cases
-
-**Use Case 1: Customer Support Chatbot**
-- A customer visits a website and clicks the chat widget to ask about product features.
-- The chatbot provides instant answers based on the company's knowledge base.
-- The customer can access their support history from the dashboard.
-
-**Use Case 2: Document Analysis**
-- A user uploads a legal contract and asks the chatbot to identify key clauses.
-- The chatbot analyzes the document and provides specific, accurate answers.
-- The user can download a summary of the contract.
-
-**Use Case 3: Research Assistant**
-- A researcher uploads multiple academic papers and asks comparative questions.
-- The chatbot retrieves relevant sections from each paper and synthesizes an answer.
-- The researcher exports the conversation for citation purposes.
-
-**Use Case 4: Content Generation**
-- A content creator asks the chatbot to generate blog post outlines or social media captions.
-- The chatbot generates content, which the user can download.
-- The user can edit the generated content and ask for revisions.
-
----
-
-## 4. Technical Design (HLD & LLD)
-
-### 4.1. High-Level Design (HLD)
-
-The HLD focuses on the major components and their interactions:
-
-```mermaid
-graph TD
-    A["Website Host"] -->|Embeds| B["React Widget"]
-    B -->|API Calls| C["FastAPI Backend"]
-    C -->|Query| D["LLM Service"]
-    C -->|Store| E["PostgreSQL"]
-    C -->|Retrieve| F["Vector Store"]
-    C -->|Upload/Download| G["File Storage"]
-    D -->|Generate Embeddings| F
-```
-
-### 4.2. Low-Level Design (LLD)
-
-The LLD details the internal structure of each component:
-
-```mermaid
-graph TD
-    subgraph Widget["React Widget"]
-        W1["Chat Interface"]
-        W2["File Upload Component"]
-        W3["Message Editor"]
-        W4["Local State Management"]
+    subgraph External["External APIs"]
+        GEM["Gemini google-genai"]
+        OAI["OpenAI optional fallback"]
     end
 
-    subgraph Backend["FastAPI Backend"]
-        B1["Route Handlers"]
-        B2["Authentication Middleware"]
-        B3["File Processing Module"]
-        B4["LLM Orchestrator"]
-        B5["Vector Store Manager"]
-    end
-
-    subgraph Services["External Services"]
-        S1["OpenAI/Anthropic API"]
-        S2["FAISS Vector Store"]
-        S3["PostgreSQL Database"]
-    end
-
-    W1 --> B1
-    W2 --> B3
-    W3 --> B1
-    B1 --> B4
-    B3 --> B5
-    B4 --> S1
-    B5 --> S2
-    B1 --> S3
+    W -->|REST + SSE JWT| API
+    CS --> GEM
+    CS --> OAI
+    API --> DB
+    VS --> DISK
 ```
 
----
-
-## 5. Technology Stack
-
-### 5.1. Frontend
-
-| Technology | Purpose |
-| :--- | :--- |
-| **React 18+** | Component-based UI framework for the widget. |
-| **TypeScript** | Type-safe JavaScript for better code quality. |
-| **Tailwind CSS** | Utility-first CSS framework for styling. |
-| **Axios** | HTTP client for API communication. |
-| **React Query** | Data fetching and caching library. |
-| **Zustand** | Lightweight state management. |
-
-### 5.2. Backend
-
-| Technology | Purpose |
-| :--- | :--- |
-| **FastAPI** | Modern, fast Python web framework for building APIs. |
-| **LangChain** | Framework for developing LLM applications. |
-| **LangChain-OpenAI** | Integration with OpenAI models. |
-| **LangChain-Anthropic** | Integration with Anthropic models. |
-| **FAISS** | Vector similarity search library. |
-| **PyPDF** | PDF parsing and text extraction. |
-| **python-docx** | DOCX file handling. |
-| **SQLAlchemy** | ORM for database interactions. |
-| **Pydantic** | Data validation and settings management. |
-
-### 5.3. Database
-
-| Technology | Purpose |
-| :--- | :--- |
-| **PostgreSQL** | Relational database for storing conversations, users, and metadata. |
-| **pgvector** | PostgreSQL extension for vector similarity search (optional). |
-
-### 5.4. File Storage
-
-| Technology | Purpose |
-| :--- | :--- |
-| **AWS S3** | Cloud-based file storage (production). |
-| **Local File System** | File storage for development/testing. |
-
-### 5.5. Deployment
-
-| Technology | Purpose |
-| :--- | :--- |
-| **Docker** | Containerization for consistent deployment. |
-| **Docker Compose** | Multi-container orchestration for local development. |
-| **Nginx** | Reverse proxy and load balancing. |
-| **Gunicorn** | WSGI server for FastAPI deployment. |
+| Tier | Technology | Location |
+|------|------------|----------|
+| Frontend | React 18, TypeScript, Vite, Tailwind | `client/` |
+| Backend | FastAPI, Uvicorn, SQLAlchemy 2 | `backend/app/` |
+| Database | SQLite default; PostgreSQL optional | `DATABASE_URL` |
+| Vectors | FAISS on disk per file | `backend/data/vector_store/` |
+| LLM | Gemini 2.5 Flash (+ model fallbacks); OpenAI if configured | `chat_service.py` |
 
 ---
 
-## 6. Local Setup for Windows 11 (i5 Processor)
+## Core workflows
 
-### 6.1. Prerequisites
+### 1. Chat (streaming)
 
-1. **Python 3.9+**: Download from [python.org](https://www.python.org/downloads/). Ensure "Add Python to PATH" is checked.
-2. **Node.js 18+**: Download from [nodejs.org](https://nodejs.org/).
-3. **PostgreSQL 14+**: Download from [postgresql.org](https://www.postgresql.org/download/windows/).
-4. **Git**: Download from [git-scm.com](https://git-scm.com/).
-5. **Docker Desktop** (Optional): For containerized development.
-6. **OpenAI API Key**: Obtain from [platform.openai.com](https://platform.openai.com/).
+1. User sends message in `CompactWidget` or `ExpandedWidget`.
+2. `streamSend.ts` optimistically adds user message; calls `streamMessage()` in `client/src/api/chat.ts` (`fetch` + `ReadableStream`).
+3. `POST /api/v1/chat/conversations/{id}/messages/stream` saves the user message, streams assistant tokens as SSE.
+4. Backend: `_prepare_assistant_context` → RAG (if processed files exist) → Gemini stream → single DB write for assistant message.
+5. Final SSE event: JSON `{ "event": "done", ... }`; UI replaces placeholder message.
 
-### 6.2. Step-by-Step Setup
+### 2. File upload → RAG
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/yourusername/chatbot-widget.git
-   cd chatbot-widget
-   ```
+1. `POST /api/v1/chat/conversations/{id}/files` (multipart, max **100MB**).
+2. File saved under `backend/data/uploads/`; DB row `status=pending`.
+3. Background: daemon thread runs `process_file_embedding` → `extract_text` → `chunk_and_store` (FAISS).
+4. Status becomes `processed` or `failed`; frontend polls every **3s** while any file is `pending`.
 
-2. **Backend Setup**:
-   ```bash
-   cd backend
-   python -m venv venv
-   .\venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+### 3. Document Q&A
 
-3. **Environment Configuration**:
-   Create a `.env` file in the backend directory:
-   ```
-   OPENAI_API_KEY=your_api_key_here
-   DATABASE_URL=postgresql://user:password@localhost/chatbot_db
-   JWT_SECRET=your_secret_key
-   ```
+1. On each message, `build_rag_context()` searches FAISS across processed files (`top_k=5`).
+2. Chunks are injected into the Gemini prompt as `DOCUMENT CONTEXT` (Google Search disabled when RAG context is present).
 
-4. **Database Setup**:
-   ```bash
-   python -m alembic upgrade head
-   ```
+### 4. PDF from chat
 
-5. **Frontend Setup**:
-   ```bash
-   cd ../frontend
-   npm install
-   ```
+1. `detect_pdf_request()` matches natural language (must include “pdf”).
+2. Backend generates markdown via Gemini; saves message with `has_pdf`, `pdf_content`, `pdf_filename`.
+3. Frontend calls `jsPDF` via `pdfGenerator.ts`.
 
-6. **Run the Application**:
-   - Backend: `python -m uvicorn main:app --reload`
-   - Frontend: `npm start`
+### 5. Generate panel
+
+1. `POST /api/v1/chat/conversations/{id}/generate` with `type` (summary | report | analysis) and `format`.
+2. Returns markdown/text JSON for client-side download (not server-rendered PDF bytes).
 
 ---
 
-## 7. Database Schema
+## Component map (actual)
 
-The system uses PostgreSQL with the following primary tables:
+### Frontend (`client/src/components/ChatbotWidget/`)
 
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+| Component | Role |
+|-----------|------|
+| `index.tsx` | Auth gate, shared state, compact/expanded routing |
+| `RemiLauncher.tsx` | Floating open button (`RemiSphere` animation) |
+| `WidgetAuthPanel.tsx` | Sign in / sign up |
+| `CompactWidget.tsx` | 350px panel; expand control |
+| `ExpandedWidget.tsx` | Full workspace; mobile tabs |
+| `ChatInterface.tsx` | Messages, input, edit modal hook |
+| `MobileTabBar.tsx` | Chat / Chats / Files on mobile |
+| `MobileConversationList.tsx` | Conversation list + folder chips |
+| `MobileFilesPanel.tsx` | Files + generate on mobile |
+| `FileUploadModal.tsx` | Drag-and-drop upload |
+| `FileGenerationPanel.tsx` | Summary / report / analysis export |
+| `WidgetConversationDashboard.tsx` | Full conversation table/cards |
+| `streamSend.ts` | Shared SSE send helper |
 
-CREATE TABLE conversations (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    title VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+### Backend (`backend/app/`)
 
-CREATE TABLE messages (
-    id SERIAL PRIMARY KEY,
-    conversation_id INTEGER NOT NULL REFERENCES conversations(id),
-    role VARCHAR(50) NOT NULL, -- 'user' or 'assistant'
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+| Module | Role |
+|--------|------|
+| `main.py` | App factory, CORS, routes, table creation |
+| `api/v1/auth.py` | signup, login, me |
+| `api/v1/chat.py` | conversations, messages, stream, generate |
+| `api/v1/files.py` | upload, list |
+| `services/chat_service.py` | LLM, RAG, PDF detection, SSE |
+| `services/vector_store_service.py` | Chunk, embed, FAISS search |
+| `services/file_parser_service.py` | PDF/DOCX/XLSX/text extraction |
+| `services/auth_service.py` | Users, JWT dependency |
+| `core/security.py` | bcrypt + python-jose |
+| `database/db.py` | SQLAlchemy models |
 
-CREATE TABLE files (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    conversation_id INTEGER REFERENCES conversations(id),
-    filename VARCHAR(255) NOT NULL,
-    file_path VARCHAR(255) NOT NULL,
-    file_type VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+---
 
-CREATE TABLE embeddings (
-    id SERIAL PRIMARY KEY,
-    file_id INTEGER NOT NULL REFERENCES files(id),
-    chunk_text TEXT NOT NULL,
-    embedding VECTOR(1536), -- OpenAI embedding dimension
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+## Database schema (summary)
+
+| Table | Purpose |
+|-------|---------|
+| `users` | email, bcrypt `hashed_password` |
+| `conversations` | `user_id` FK, title |
+| `messages` | role, content, optional PDF fields |
+| `uploaded_files` | UUID id, path, `pending` / `processed` / `failed` |
+
+Cascade deletes: user → conversations → messages & files. See [ARCHITECTURE.md §7](./ARCHITECTURE.md#7-database-schema).
+
+---
+
+## API surface (prefix `/api/v1`)
+
+| Area | Endpoints |
+|------|-----------|
+| Auth | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` |
+| Chat | CRUD `/chat/conversations`, `GET/POST .../messages`, `POST .../messages/stream`, `POST .../generate` |
+| Files | `POST/GET .../conversations/{id}/files` |
+| Public | `GET /`, `GET /health` |
+
+Interactive docs: `http://localhost:8000/docs` when the API is running.
+
+---
+
+## Security (as implemented)
+
+| Topic | Implementation |
+|-------|----------------|
+| Auth | JWT Bearer (`SECRET_KEY`, HS256, 8-day default expiry) |
+| Passwords | bcrypt in `core/security.py` (not passlib) |
+| Ownership | `get_conversation(id, user_id)` on all chat/file routes → 404 if wrong user |
+| CORS | Explicit origins + optional `https://.*\.vercel\.app` regex |
+| Upload limit | 100MB backend + middleware 413 |
+
+**Not implemented:** rate limiting, RBAC, refresh tokens, email verification, content moderation API.
+
+---
+
+## Deployment (production)
+
+| Layer | Typical target |
+|-------|----------------|
+| Frontend | **Vercel** (`VITE_API_URL` at build time) |
+| Backend | **Render** (deploy hook in CI) or **Railway** (`backend/Dockerfile`, `railway.toml`) |
+| Database | Managed PostgreSQL on host platform; SQLite for local dev only |
+
+See [07_deployment_guide.md](./07_deployment_guide.md).
+
+---
+
+## Local setup (quick)
+
+```bash
+cp .env.example .env.local   # repo root — set GEMINI_API_KEY
+cd backend && pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+cd client && npm run dev     # http://127.0.0.1:5173
 ```
 
----
-
-## 8. API Endpoints
-
-### 8.1. Chat Endpoints
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| POST | `/api/chat` | Send a message and get a response. |
-| GET | `/api/conversations` | Retrieve all conversations for a user. |
-| GET | `/api/conversations/{id}` | Retrieve a specific conversation. |
-| DELETE | `/api/conversations/{id}` | Delete a conversation. |
-
-### 8.2. File Endpoints
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| POST | `/api/upload` | Upload a file for analysis. |
-| GET | `/api/files` | Retrieve all files for a user. |
-| DELETE | `/api/files/{id}` | Delete a file. |
-| POST | `/api/generate` | Generate a file (summary, report, etc.). |
-
-### 8.3. User Endpoints
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| POST | `/api/auth/register` | Register a new user. |
-| POST | `/api/auth/login` | Authenticate and get a JWT token. |
-| GET | `/api/user/profile` | Retrieve user profile. |
+Use `DATABASE_URL=sqlite:///./chatbot.db` for local dev without PostgreSQL.
 
 ---
 
-## 9. Security Considerations
+## Related documentation
 
-The system implements several security measures:
-
-1. **Authentication**: JWT-based token authentication for API endpoints.
-2. **Authorization**: Role-based access control (RBAC) for conversations and files.
-3. **Data Encryption**: HTTPS for all API communications.
-4. **File Validation**: Strict validation of uploaded files to prevent malicious uploads.
-5. **Rate Limiting**: API rate limiting to prevent abuse.
-6. **SQL Injection Prevention**: Parameterized queries via SQLAlchemy ORM.
-
----
-
-## 10. Deployment Strategies
-
-### 10.1. Development Environment
-
-For local development on Windows 11, run both backend and frontend on localhost with hot-reload enabled.
-
-### 10.2. Production Environment
-
-For production deployment:
-
-1. **Containerize** the application using Docker.
-2. **Deploy** to cloud platforms (AWS, GCP, Azure) or self-hosted servers.
-3. **Use** a reverse proxy (Nginx) for routing and SSL termination.
-4. **Implement** CI/CD pipelines for automated testing and deployment.
-5. **Monitor** application performance and logs using tools like ELK Stack or DataDog.
-
----
-
-## 11. Conclusion
-
-The AI Chatbot Widget is a comprehensive, production-ready solution that combines the flexibility of a general-purpose AI assistant with the precision of file-based document analysis. Its modular architecture allows for easy customization and integration into any website, while its robust backend ensures scalability and reliability.
+| Doc | Contents |
+|-----|----------|
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Implementation reference with file/line evidence |
+| [03_features_capabilities.md](./03_features_capabilities.md) | Feature list: shipped vs not |
+| [04_ml_ai_concepts.md](./04_ml_ai_concepts.md) | RAG/LLM concepts mapped to this repo |
+| [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md) | Directory tree |
+| [07_deployment_guide.md](./07_deployment_guide.md) | Deploy and env vars |
+| [../README.md](../README.md) | Quick start and API reference |
