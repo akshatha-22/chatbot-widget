@@ -135,18 +135,18 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser — React widget (client/)                           │
 │  main.tsx → App.tsx → FloatingWidget → ChatbotWidget        │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │ RemiLauncher│→ │ CompactWidget│→ │ ExpandedWidget    │  │
-│  │ (animated)  │  │ (350px chat) │  │ (sidebar + panels)│  │
-│  └─────────────┘  └──────────────┘  └───────────────────┘  │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────┐   │
+│  │ RemiLauncher│→ │ CompactWidget│→ │ ExpandedWidget    │   │
+│  │ (animated)  │  │ (350px chat) │  │ (sidebar + panels)│   │
+│  └─────────────┘  └──────────────┘  └───────────────────┘   │
 │         │ WidgetAuthPanel (login/signup inside widget)      │
 └─────────┼───────────────────────────────────────────────────┘
           │ REST + SSE (JWT Bearer token)
           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  FastAPI (backend/app/main.py)                              │
-│  /api/v1/auth/*     signup, login, me                       │
-│  /api/v1/chat/*     conversations, messages, stream, generate│
+│  /api/v1/auth/*    signup, login, me                        │
+│  /api/v1/chat/*    conversations, messages, stream, generate│
 │  /api/v1/chat/conversations/{id}/files  upload + list       │
 └─────────┼───────────────────────────────────────────────────┘
           │
