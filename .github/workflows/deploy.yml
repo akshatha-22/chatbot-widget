@@ -1,6 +1,8 @@
 name: Deploy
 
-# Runs after CI succeeds on main, or manually from the Actions tab.
+# Frontend only: deploys client/ to Vercel after CI succeeds on main.
+# Backend deploys separately on Railway (backend/Dockerfile, railway.toml) via
+# Railway GitHub integration or manual deploy — not triggered by this workflow.
 on:
   workflow_run:
     workflows: [CI]
@@ -32,17 +34,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-
-      - name: Trigger Render backend deploy
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "RENDER_DEPLOY_HOOK not set — skipping Render deploy"
-            exit 0
-          fi
-          curl -fsSL -X POST "$RENDER_DEPLOY_HOOK"
-          echo "Render deploy hook triggered"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -77,14 +68,18 @@ jobs:
             echo ""
             echo "| Target | Status |"
             echo "|--------|--------|"
-            if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
-              echo "| Render (backend) | triggered |"
-            else
-              echo "| Render (backend) | skipped — add \`RENDER_DEPLOY_HOOK\` |"
-            fi
             if [ -n "${{ secrets.VERCEL_TOKEN }}" ]; then
               echo "| Vercel (frontend) | deployed |"
             else
               echo "| Vercel (frontend) | skipped — add Vercel secrets |"
             fi
+            echo "| Railway (backend) | not in this workflow — deploy via Railway dashboard or \`railway up\` |"
+            echo ""
+            echo "### Backend (Railway)"
+            echo ""
+            echo "- Service root: \`backend/\`"
+            echo "- Build: \`backend/Dockerfile\` + \`backend/railway.toml\`"
+            echo "- Health check: \`GET /health\`"
+            echo "- Set \`VITE_API_URL\` (GitHub secret / Vercel env) to your Railway public HTTPS URL"
+            echo "- Required Railway vars: \`DATABASE_URL\`, \`GEMINI_API_KEY\`, \`SECRET_KEY\`, \`CORS_ORIGINS\`"
           } >> "$GITHUB_STEP_SUMMARY"
