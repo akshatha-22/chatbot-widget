@@ -483,5 +483,5 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Last updated:** May 2026  
+**Last updated:** June 2026  
 **Status:** Production-oriented widget with chat, RAG, PDF generation, and CI/CD. Codebase trimmed to live runtime paths only.
