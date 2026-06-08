@@ -318,6 +318,7 @@ chatbot-widget/
 | [03_features_capabilities.md](docs/03_features_capabilities.md) | Shipped features vs not implemented |
 | [04_ml_ai_concepts.md](docs/04_ml_ai_concepts.md) | RAG/LLM concepts mapped to this repo |
 | [05_project_structure(with_optional_enhancements).md](docs/05_project_structure(with_optional_enhancements).md) | Directory layout |
+| [06_Epics_User_stories_and_Use_cases.md](docs/06_Epics_User_stories_and_Use_cases.md) | Has Epics, User stories and Use-cases |
 | [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
 
 ---
