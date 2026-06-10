@@ -562,5 +562,9 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 **Last updated:** June 2026  
+<<<<<<< HEAD
 **Status:** Production-oriented widget with chat, RAG (versioned DB-persisted indexes), audit logging, auth rate limiting, file delete, per-user response cache, Gemini quota, and CI/CD (Railway + Vercel).
 
+=======
+**Status:** Production-oriented widget with chat, RAG, PDF generation, and CI/CD. Codebase trimmed to live runtime paths only.
+>>>>>>> 6909d603009e4a5bc44d42c7b34c47b3bc893b2e
