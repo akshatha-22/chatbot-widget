@@ -159,7 +159,7 @@ const ChatbotWidget = () => {
         console.error('File polling error:', e)
         clearInterval(interval)
       }
-    }, 3000)
+    }, 1500)
 
     const timeout = setTimeout(() => {
       clearInterval(interval)

@@ -19,16 +19,30 @@ No live **Gemini** or **OpenAI** calls during tests — `conftest.py` clears API
 
 ```
 tests/
-├── conftest.py          # DB override, TestClient, auth + conversation fixtures
-├── test_api_health.py   # GET /, GET /health
-├── test_api_auth.py     # POST signup/login, GET /auth/me
-├── test_api_chat.py     # Conversations, messages, SSE stream
-├── test_api_edge_cases.py  # Auth isolation, PDF, generate, RAG, file failures
-├── test_api_files.py    # Upload + list files (vector store mocked)
-└── README.md            # This file
+├── conftest.py              # DB override, TestClient, auth + conversation fixtures
+├── test_api_health.py       # GET /, GET /health
+├── test_api_auth.py         # POST signup/login, GET /auth/me
+├── test_api_chat.py         # Conversations, messages, SSE stream
+├── test_api_edge_cases.py   # Auth isolation, PDF, generate, RAG, file failures
+├── test_api_files.py        # Upload + list files (vector store mocked)
+├── test_security_features.py # Security headers, MIME, quota 429
+├── test_network.py          # get_real_ip proxy headers
+├── unit/
+│   ├── test_sanitizer.py           # Prompt injection stripping
+│   ├── test_response_cache.py      # Per-user cache keys, cache_hit
+│   ├── test_mime_validation.py     # Magic-byte MIME validation
+│   ├── test_request_body_limits.py # 1 MB chat / 52 MB upload caps
+│   ├── test_quota_service.py       # UTC reset, reset_at in 429
+│   ├── test_audit_service.py       # Audit log writes
+│   ├── test_auth_rate_limit.py     # Login/signup 429 per IP
+│   ├── test_vector_store_versioning.py  # embedding_model_version + reindex
+│   ├── test_admin_faiss_health.py  # GET /admin/faiss-health
+│   ├── test_file_delete.py         # Delete atomicity, 403 non-owner
+│   └── test_network.py             # Cloudflare IP validation
+└── README.md                # This file
 ```
 
-Legacy empty placeholders (`test_chat.py`, `integration/*`, etc.) are unused; the `test_api_*.py` files are the active suite.
+Legacy empty placeholders (`test_chat.py`, `integration/*`, etc.) are unused; `test_api_*.py` and `tests/unit/` are the active suite.
 
 ## Run tests
 
@@ -50,6 +64,7 @@ python -m pytest tests/ -v
 Run a single module:
 
 ```bash
+python -m pytest tests/unit/test_file_delete.py -v
 python -m pytest tests/test_api_auth.py -v
 ```
 
@@ -66,7 +81,7 @@ python -m pytest tests/test_api_auth.py -v
 | `upload_dir` | Temp upload directory (monkeypatches `UPLOAD_DIR`) |
 | `conversation_id` | Creates one conversation for the authenticated user |
 
-## Coverage by endpoint
+## Coverage by area
 
 ### Health
 - `GET /` — welcome payload
@@ -76,6 +91,7 @@ python -m pytest tests/test_api_auth.py -v
 - `POST /signup` — success, duplicate email (400), invalid email (422), short password (422)
 - `POST /login` — success, wrong password (401)
 - `GET /me` — 401 without token, profile with token
+- Auth rate limiting — 429 after repeated failed login/signup (`unit/test_auth_rate_limit.py`)
 
 ### Chat (`/api/v1/chat`)
 - `POST /conversations` — create
@@ -87,6 +103,24 @@ python -m pytest tests/test_api_auth.py -v
 - `GET /conversations/{id}/messages` — list messages
 - `POST /conversations/{id}/messages/stream` — SSE content-type and `data:` events
 - 401 without auth, 404 for unknown conversation
+
+### Files (`/api/v1/chat/conversations/{id}/files`)
+- `POST …/files` — upload `.txt`, status `processed` (indexing mocked)
+- `GET …/files` — list uploaded file
+- `DELETE …/files/{id}` — owner delete (204); non-owner **403** (`unit/test_file_delete.py`)
+- 401 without auth, 404 for unknown conversation
+
+### Security & infrastructure (`unit/` + `test_security_features.py`)
+- Security headers middleware (production HSTS when `ENVIRONMENT=production`)
+- MIME magic-byte validation (415)
+- Request body size limits (413)
+- Prompt sanitization (400 on injection-only messages)
+- Per-user response cache keys + `cache_hit`
+- Gemini quota UTC reset + `reset_at` in 429
+- Audit log background writes
+- FAISS `embedding_model_version` + `/admin/faiss-health`
+- Cloudflare IP range validation (`CLOUDFLARE_ONLY`)
+- `get_real_ip()` proxy header precedence
 
 ### Edge cases (`test_api_edge_cases.py`)
 
@@ -104,20 +138,15 @@ python -m pytest tests/test_api_auth.py -v
 
 **Files:** empty file list, upload without file (422), parse failure (422), index failure (422), DOCX path (parser mocked), RAG search invoked after upload (search mocked)
 
-### Files (`/api/v1/chat/conversations/{id}/files`)
-- `POST …/files` — upload `.txt`, status `processed` (indexing mocked)
-- `GET …/files` — list uploaded file
-- 401 without auth, 404 for unknown conversation
-
 ## Not covered (yet)
 
 - Expired JWT (time-based)
 - Real PDF/DOCX/XLSX binary parsing (only mocked parser paths)
-- Real FAISS / sentence-transformers load and search
-- Rate limiting / production middleware
+- Real FAISS / `sentence-transformers` load and search
+- Multi-replica in-memory rate limit / cache behavior
 - Concurrent requests / race conditions
-- File size limits (not enforced in API today)
+- Frontend file delete UI or stream abort on widget close
 
 ## Last verified
 
-55 tests passing (`python -m pytest tests/ -v`) on Python 3.12 with dependencies from `requirements.txt`.
+**105 tests** passing (`python -m pytest tests/ -v`) on Python 3.12 with dependencies from `requirements.txt`.

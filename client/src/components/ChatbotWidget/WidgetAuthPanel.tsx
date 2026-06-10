@@ -105,7 +105,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
             placeholder="you@example.com"
             autoComplete="email"
             required
-            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 md:py-2.5 md:text-sm"
+            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#2979FF]/30 md:py-2.5 md:text-sm"
           />
           <input
             type="password"
@@ -115,7 +115,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
             autoComplete={isLogin ? 'current-password' : 'new-password'}
             minLength={6}
             required
-            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#F59E0B]/30 md:py-2.5 md:text-sm"
+            className="w-full rounded-[12px] border-0 bg-[#F5F5F5] px-3.5 py-3 text-base text-[#1A1A1A] placeholder:text-[#ACACAC] outline-none focus:ring-2 focus:ring-[#2979FF]/30 md:py-2.5 md:text-sm"
           />
 
           {error && (
@@ -127,7 +127,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
           <button
             type="submit"
             disabled={loading}
-            className="min-h-[44px] w-full rounded-[12px] bg-[#F59E0B] py-3 text-sm font-semibold text-white active:scale-[0.98] disabled:opacity-50 md:py-2.5 md:hover:bg-[#D97706]"
+            className="min-h-[44px] w-full rounded-[12px] bg-[#2979FF] py-3 text-sm font-semibold text-white active:scale-[0.98] disabled:opacity-50 md:py-2.5 md:hover:bg-[#1565C0]"
           >
             {loading ? 'Please wait…' : isLogin ? 'Sign in' : 'Sign up'}
           </button>
@@ -141,7 +141,7 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
               setIsLogin((prev) => !prev)
               setError('')
             }}
-            className="inline-flex min-h-[44px] items-center font-semibold text-[#D97706] active:opacity-80 md:hover:underline"
+            className="inline-flex min-h-[44px] items-center font-semibold text-[#1565C0] active:opacity-80 md:hover:underline"
           >
             {isLogin ? 'Sign up' : 'Sign in'}
           </button>

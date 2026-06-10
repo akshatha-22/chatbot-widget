@@ -137,7 +137,7 @@ sequenceDiagram
     BG->>E: extract_text chunk_and_store
     E->>E: FAISS .index + .chunks
     E->>E: status processed commit
-    W->>W: Poll listFiles every 3s
+    W->>W: Poll listFiles every 1.5s
 ```
 
 ---
@@ -260,13 +260,15 @@ Desktop expanded: sidebar + chat + files (`md` / `lg` breakpoints).
 
 ## 11. Database ER diagram (schema)
 
-SQLAlchemy models in `backend/app/database/db.py`. Tables are created on API startup via `Base.metadata.create_all` in `main.py` (no Alembic migrations in repo). Existing SQLite databases may get PDF columns added by a one-off migration in `main.py` (`has_pdf`, `pdf_content`, `pdf_filename` on `messages`).
+SQLAlchemy models in `backend/app/database/db.py`. Tables are created on API startup via `Base.metadata.create_all` in `main.py`, plus idempotent patches in `database/migrations/startup.py` (audit_logs, embedding_model_version, indexes). Alembic revision: `versions/20250603_0001_audit_logs_and_faiss_version.py`.
 
-**Not stored in the database:** FAISS vector indices and raw upload bytes live on disk under `backend/data/vector_store/` and `backend/data/uploads/`.
+**Also on disk (cache/fallback):** `backend/data/vector_store/` and `backend/data/uploads/`. **Primary index storage:** `uploaded_files.faiss_index_blob` and `chunks_blob` (survives Railway redeploy).
 
 ```mermaid
 erDiagram
     users ||--o{ conversations : "owns (CASCADE)"
+    users ||--o{ gemini_daily_usage : "tracks (CASCADE)"
+    users ||--o{ audit_logs : "logged (SET NULL)"
     conversations ||--o{ messages : "has (CASCADE)"
     conversations ||--o{ uploaded_files : "has (CASCADE)"
 
@@ -302,6 +304,26 @@ erDiagram
         varchar filename "255"
         varchar file_path "500, disk path"
         varchar status "50, pending | processed | failed"
+        blob faiss_index_blob "nullable, FAISS index bytes"
+        blob chunks_blob "nullable, pickled text chunks"
+        varchar embedding_model_version "nullable, e.g. all-MiniLM-L6-v2"
+        datetime created_at "utc default"
+    }
+
+    audit_logs {
+        int id PK "indexed"
+        int user_id FK "nullable, SET NULL on delete"
+        varchar action "100, e.g. login, file_delete"
+        varchar ip_address "45, nullable"
+        text metadata_json "nullable"
+        datetime created_at "utc default"
+    }
+
+    gemini_daily_usage {
+        int id PK "indexed"
+        int user_id FK "NOT NULL, ON DELETE CASCADE"
+        varchar usage_date "10, YYYY-MM-DD UTC"
+        int call_count "default 0"
         datetime created_at "utc default"
     }
 ```
@@ -311,6 +333,8 @@ erDiagram
 | Parent | Child | FK | On delete | ORM cascade |
 |--------|-------|-----|-----------|-------------|
 | `users` | `conversations` | `conversations.user_id` | **CASCADE** | `all, delete-orphan` on `User.conversations` |
+| `users` | `gemini_daily_usage` | `gemini_daily_usage.user_id` | **CASCADE** | unique `(user_id, usage_date)` |
+| `users` | `audit_logs` | `audit_logs.user_id` | **SET NULL** | best-effort audit trail |
 | `conversations` | `messages` | `messages.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.messages` |
 | `conversations` | `uploaded_files` | `uploaded_files.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.files` |
 

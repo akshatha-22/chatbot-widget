@@ -14,19 +14,13 @@ export default function RemiLauncher({ onClick, hasUnread = false }: RemiLaunche
       <button
         type="button"
         onClick={onClick}
-        className="group relative h-[68px] w-[68px] rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F59E0B] focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAFAFA]"
+        className="group relative flex h-[68px] w-[68px] items-center justify-center overflow-visible rounded-full border-0 bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2979FF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#FAFAFA]"
         aria-label="Open Remi chat"
       >
         <RemiSphere size={68} />
-        {/* subtle white ring on hover */}
-        <span
-          className="pointer-events-none absolute inset-0 rounded-full border-2 border-white/30 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-          aria-hidden
-        />
-        {/* unread notification dot */}
         {hasUnread && (
           <span
-            className="absolute right-0 top-0 h-[8px] w-[8px] rounded-full bg-[#F59E0B] ring-2 ring-[#FAFAFA]"
+            className="absolute right-0 top-0 h-[8px] w-[8px] rounded-full bg-[#2979FF] ring-2 ring-[#FAFAFA]"
             aria-label="Unread messages"
           />
         )}

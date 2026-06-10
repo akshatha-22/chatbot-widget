@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Menu,
   ArrowLeft,
   Minimize2,
   X,
   Trash2,
-  FileText,
   Search,
   Star,
   Check,
@@ -13,7 +12,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { streamSendMessage } from './streamSend'
-import { uploadFile } from '../../api/files'
+import { deleteFile, uploadFile } from '../../api/files'
 import ChatInterface from './ChatInterface'
 import WidgetConversationDashboard from './WidgetConversationDashboard'
 import RemiAvatar2D from './RemiAvatar2D'
@@ -23,25 +22,11 @@ import FileGenerationPanel from './FileGenerationPanel'
 import MobileTabBar, { type MobileTabId } from './MobileTabBar'
 import MobileConversationList from './MobileConversationList'
 import MobileFilesPanel from './MobileFilesPanel'
+import FileListItem from './FileListItem'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { NavTooltip, WidgetTooltipProvider } from './NavTooltip'
 
 type View = 'chat' | 'dashboard'
-
-const FILE_TYPE_COLORS: Record<string, string> = {
-  pdf: '#EF4444',
-  doc: '#3B82F6',
-  docx: '#3B82F6',
-  xls: '#22C55E',
-  xlsx: '#22C55E',
-  csv: '#22C55E',
-  txt: '#8C8C8C',
-  md: '#8C8C8C',
-}
-
-function fileIconColor(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  return FILE_TYPE_COLORS[ext] ?? '#8C8C8C'
-}
 
 function formatConvTime(iso: string): string {
   const d = new Date(iso)
@@ -113,7 +98,13 @@ export default function ExpandedWidget({
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileUploadOpen, setFileUploadOpen] = useState(false)
   const [rightTab, setRightTab] = useState<'files' | 'generate'>('files')
+  const [rateLimitSeconds, setRateLimitSeconds] = useState(0)
+  const [fileToast, setFileToast] = useState<{
+    message: string
+    type: 'success' | 'error'
+  } | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     setIsTyping(false)
@@ -129,6 +120,7 @@ export default function ExpandedWidget({
   useEffect(() => {
     return () => {
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+      if (fileToastTimerRef.current) clearTimeout(fileToastTimerRef.current)
     }
   }, [])
 
@@ -136,6 +128,12 @@ export default function ExpandedWidget({
     setShowSaved(true)
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     savedTimerRef.current = setTimeout(() => setShowSaved(false), 2000)
+  }
+
+  const flashFileToast = (message: string, type: 'success' | 'error') => {
+    setFileToast({ message, type })
+    if (fileToastTimerRef.current) clearTimeout(fileToastTimerRef.current)
+    fileToastTimerRef.current = setTimeout(() => setFileToast(null), 2500)
   }
 
   const handleOpenFileUploadModal = () => {
@@ -148,6 +146,22 @@ export default function ExpandedWidget({
       prev.some((f) => f.id === uploaded.id) ? prev : [...prev, uploaded],
     )
   }
+
+  const handleDeleteFile = useCallback(
+    async (fileId: string) => {
+      if (!conversation) return
+      const snapshot = files
+      onFilesChange((prev) => prev.filter((f) => f.id !== fileId))
+      try {
+        await deleteFile(conversation.id, fileId)
+        flashFileToast('File deleted', 'success')
+      } catch {
+        onFilesChange(snapshot)
+        flashFileToast('Could not delete file', 'error')
+      }
+    },
+    [conversation, files, onFilesChange],
+  )
 
   const handleSend = async () => {
     const content = input.trim()
@@ -162,6 +176,7 @@ export default function ExpandedWidget({
       onMessagesChange,
       onRefreshConversations,
       setIsTyping,
+      onRateLimit: setRateLimitSeconds,
     })
     flashSaved()
   }
@@ -227,13 +242,13 @@ export default function ExpandedWidget({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search conversations"
-            className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-base text-[#1A1A1A] outline-none placeholder:text-[#ACACAC] focus:ring-2 focus:ring-[#F59E0B]/30 md:text-sm"
+            className="w-full rounded-lg border-0 bg-white py-2 pl-8 pr-3 text-base text-[#1A1A1A] outline-none placeholder:text-[#ACACAC] focus:ring-2 focus:ring-[#2979FF]/30 md:text-sm"
           />
         </div>
         <button
           type="button"
           onClick={() => void onNewConversation()}
-          className="min-h-[44px] w-full rounded-[10px] bg-[#F59E0B] py-2 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(245,158,11,0.3)] active:scale-[0.98] md:hover:bg-[#D97706]"
+          className="min-h-[44px] w-full rounded-[10px] bg-[#2979FF] py-2 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(41,121,255,0.3)] active:scale-[0.98] md:hover:bg-[#1565C0]"
         >
           + New Chat
         </button>
@@ -256,7 +271,7 @@ export default function ExpandedWidget({
               }}
               className={`group relative flex min-h-[44px] cursor-pointer items-start gap-1.5 rounded-lg px-2.5 py-3 transition-colors duration-150 active:bg-[#F5F5F5] ${
                 isActive
-                  ? 'border-l-[3px] border-[#F59E0B] bg-[#FFFBF0] pl-2'
+                  ? 'border-l-[3px] border-[#2979FF] bg-[#E3F2FD] pl-2'
                   : 'border-l-[3px] border-transparent md:hover:bg-[#F5F5F5]'
               }`}
             >
@@ -268,7 +283,7 @@ export default function ExpandedWidget({
                 }}
                 className={`mt-0.5 shrink-0 rounded-md p-2 active:opacity-70 ${
                   starred
-                    ? 'text-[#F59E0B] opacity-100'
+                    ? 'text-[#2979FF] opacity-100'
                     : 'text-[#ACACAC] opacity-100 md:opacity-0 md:group-hover:opacity-100'
                 }`}
                 aria-label={starred ? 'Unstar' : 'Star conversation'}
@@ -308,7 +323,7 @@ export default function ExpandedWidget({
             void onRefreshConversations()
             setView('dashboard')
           }}
-          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium text-[#D97706] active:bg-[#FFFBF0] md:hover:bg-[#FFFBF0]"
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium text-[#1565C0] active:bg-[#E3F2FD] md:hover:bg-[#E3F2FD]"
         >
           <LayoutList size={16} />
           View All Conversations
@@ -355,7 +370,7 @@ export default function ExpandedWidget({
                 type="button"
                 onClick={handleOpenFileUploadModal}
                 disabled={!conversation}
-                className="min-h-[44px] text-xs font-semibold text-[#D97706] active:text-[#B45309] disabled:opacity-40 md:hover:text-[#B45309]"
+                className="min-h-[44px] text-xs font-semibold text-[#1565C0] active:text-[#0D47A1] disabled:opacity-40 md:hover:text-[#0D47A1]"
               >
                 + Add More
               </button>
@@ -369,44 +384,14 @@ export default function ExpandedWidget({
                 No files yet. Upload a PDF, DOCX, or TXT to chat with your documents.
               </p>
             )}
-            {files.map((f) => {
-              const processed = f.status === 'processed'
-              const failed = f.status === 'failed'
-              return (
-                <div
-                  key={f.id}
-                  className="flex min-h-[44px] items-center gap-2.5 rounded-[8px] border border-[#F0F0F0] bg-white px-3 py-2.5 active:bg-[#FAFAFA] md:transition-shadow md:hover:shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
-                >
-                  <FileText
-                    size={16}
-                    className="shrink-0"
-                    style={{ color: fileIconColor(f.filename) }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-[#1A1A1A]">
-                      {f.filename}
-                    </p>
-                    {processed ? (
-                      <p className="flex items-center gap-1 text-[11px] text-[#22C55E]">
-                        <Check size={11} /> Ready
-                      </p>
-                    ) : failed ? (
-                      <p className="flex items-center gap-1 text-[11px] text-red-500">
-                        <X size={11} aria-hidden /> Failed — try again
-                      </p>
-                    ) : (
-                      <p className="flex items-center gap-1 text-[11px] text-amber-500">
-                        <span
-                          className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-500 border-t-transparent"
-                          aria-hidden
-                        />
-                        Processing…
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+            {files.map((f) => (
+              <FileListItem
+                key={f.id}
+                file={f}
+                onDelete={handleDeleteFile}
+                compact
+              />
+            ))}
           </div>
         </>
       ) : (
@@ -415,40 +400,56 @@ export default function ExpandedWidget({
     </>
   )
 
+  const sidebarHint =
+    isMobile && mobileTab === 'conversations'
+      ? 'Return to the active chat'
+      : isMobile
+        ? 'Browse and switch conversations'
+        : 'Show or hide conversation list'
+
   return (
+    <WidgetTooltipProvider>
     <div className="fixed inset-0 z-50 flex flex-col bg-white animate-widgetIn max-md:rounded-none md:inset-4 md:rounded-2xl md:shadow-2xl">
       <header className="relative grid h-14 shrink-0 grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-1 border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA] px-2 md:flex md:justify-between md:px-4">
         <div className="flex justify-start md:contents">
           {view === 'chat' ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (isMobile) {
-                  if (mobileTab === 'conversations') {
-                    setMobileTab('chat')
-                  } else {
-                    setMobileTab('conversations')
-                  }
-                  setView('chat')
-                } else {
-                  setSidebarOpen((p) => !p)
-                }
-              }}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
-              aria-label={
-                isMobile && mobileTab === 'conversations'
-                  ? 'Back to chat'
-                  : isMobile
-                    ? 'Open conversations'
-                    : 'Toggle sidebar'
+            <NavTooltip
+              label={
+                isMobile && mobileTab === 'conversations' ? 'Back to chat' : 'Conversations'
               }
+              description={sidebarHint}
+              side="bottom"
             >
-              {isMobile && mobileTab === 'conversations' ? (
-                <ArrowLeft size={18} />
-              ) : (
-                <Menu size={18} />
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isMobile) {
+                    if (mobileTab === 'conversations') {
+                      setMobileTab('chat')
+                    } else {
+                      setMobileTab('conversations')
+                    }
+                    setView('chat')
+                  } else {
+                    setSidebarOpen((p) => !p)
+                  }
+                }}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
+                aria-label={
+                  isMobile && mobileTab === 'conversations'
+                    ? 'Back to chat'
+                    : isMobile
+                      ? 'Open conversations'
+                      : 'Toggle sidebar'
+                }
+              >
+                {isMobile && mobileTab === 'conversations' ? (
+                  <ArrowLeft size={18} />
+                ) : (
+                  <Menu size={18} />
+                )}
+              </button>
+            </NavTooltip>
           ) : (
             <div className="h-10 w-10 shrink-0 md:h-11 md:w-11" />
           )}
@@ -474,35 +475,52 @@ export default function ExpandedWidget({
               Saved
             </span>
           )}
+          {fileToast && (
+            <span
+              className={`mr-1 hidden animate-fadeIn items-center gap-1 text-xs font-medium sm:flex ${
+                fileToast.type === 'success' ? 'text-[#22C55E]' : 'text-red-500'
+              }`}
+            >
+              {fileToast.type === 'success' ? <Check size={14} /> : <X size={14} />}
+              {fileToast.message}
+            </span>
+          )}
           {onLogout && (
+            <NavTooltip label="Sign out" description="Log out of your account" side="bottom">
+              <button
+                type="button"
+                onClick={onLogout}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
+                aria-label="Sign out"
+              >
+                <LogOut size={17} />
+              </button>
+            </NavTooltip>
+          )}
+          <NavTooltip
+            label="Compact view"
+            description="Shrink to the small floating widget"
+            side="bottom"
+          >
             <button
               type="button"
-              onClick={onLogout}
+              onClick={onCollapse}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
-              aria-label="Sign out"
-              title="Sign out"
+              aria-label="Collapse to compact widget"
             >
-              <LogOut size={17} />
+              <Minimize2 size={17} />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onCollapse}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
-            aria-label="Collapse to compact widget"
-            title="Collapse"
-          >
-            <Minimize2 size={17} />
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
-            aria-label="Close widget"
-            title="Close"
-          >
-            <X size={18} />
-          </button>
+          </NavTooltip>
+          <NavTooltip label="Close" description="Hide the chat widget" side="bottom">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[#8C8C8C] active:bg-[#F5F5F5] md:min-h-[44px] md:min-w-[44px] md:p-1.5 md:hover:bg-[#F5F5F5] md:hover:text-[#1A1A1A]"
+              aria-label="Close widget"
+            >
+              <X size={18} />
+            </button>
+          </NavTooltip>
         </div>
       </header>
 
@@ -561,6 +579,10 @@ export default function ExpandedWidget({
                     onFileChange={handleFile}
                     bottomRef={bottomRef}
                     mobileLayout
+                    rateLimitSeconds={rateLimitSeconds}
+                    onRateLimitExpired={() => setRateLimitSeconds(0)}
+                    uploadedFileCount={files.length}
+                    onViewFiles={() => setMobileTab('files')}
                   />
                 </div>
               )}
@@ -571,6 +593,7 @@ export default function ExpandedWidget({
                     messages={messages}
                     files={files}
                     onAddMore={handleOpenFileUploadModal}
+                    onDeleteFile={handleDeleteFile}
                   />
                 </aside>
               )}
@@ -603,6 +626,10 @@ export default function ExpandedWidget({
                   onFileChange={handleFile}
                   bottomRef={bottomRef}
                   mobileLayout={false}
+                  rateLimitSeconds={rateLimitSeconds}
+                  onRateLimitExpired={() => setRateLimitSeconds(0)}
+                  uploadedFileCount={files.length}
+                  onViewFiles={() => setRightTab('files')}
                 />
               </div>
 
@@ -612,7 +639,11 @@ export default function ExpandedWidget({
             </div>
           )}
 
-          <MobileTabBar active={mobileTab} onChange={setMobileTab} />
+          <MobileTabBar
+            active={mobileTab}
+            onChange={setMobileTab}
+            fileCount={files.length}
+          />
         </div>
       )}
 
@@ -626,5 +657,6 @@ export default function ExpandedWidget({
         />
       )}
     </div>
+    </WidgetTooltipProvider>
   )
 }

@@ -3,13 +3,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Warm Minimal design system
-        amber: {
-          DEFAULT: '#F59E0B',
-          50: '#FFFBF0',
-          400: '#FBBF24',
-          500: '#F59E0B',
-          600: '#D97706',
+        // Remi electric-blue accent (replaces amber)
+        remi: {
+          DEFAULT: '#2979FF',
+          50: '#E3F2FD',
+          400: '#42A5F5',
+          500: '#2979FF',
+          600: '#1565C0',
+          700: '#0D47A1',
         },
         warm: {
           bg: '#FAFAFA',
@@ -22,12 +23,12 @@ export default {
           label: '#4A4A4A',
         },
         primary: {
-          50: '#FFFBF0',
-          100: '#FEF3C7',
-          500: '#F59E0B',
-          600: '#D97706',
-          700: '#B45309',
-          900: '#78350F',
+          50: '#E3F2FD',
+          100: '#BBDEFB',
+          500: '#2979FF',
+          600: '#1565C0',
+          700: '#0D47A1',
+          900: '#0D47A1',
         },
       },
       fontFamily: {

@@ -1,0 +1,24 @@
+:root {
+  /* Remi sphere */
+  --remi-sphere-body: #212121;
+  --remi-sphere-body-light: #2a2a2a;
+  --remi-sphere-highlight: #2a2a2a;
+  --remi-ring: #2979ff;
+  --remi-ring-dark: #1565c0;
+  --remi-ring-glow: rgba(41, 121, 255, 0.55);
+  --remi-ring-glow-soft: rgba(41, 121, 255, 0.25);
+
+  /* Eyes */
+  --remi-eye-socket: #2d2d2d;
+  --remi-eye-socket-dark: #141414;
+  --remi-eye-specular: #ffffff;
+
+  /* Accent (replaces amber) */
+  --remi-accent: #2979ff;
+  --remi-accent-hover: #1565c0;
+  --remi-accent-active: #0d47a1;
+  --remi-accent-light: #42a5f5;
+  --remi-accent-soft: #e3f2fd;
+  --remi-accent-glow: rgba(41, 121, 255, 0.4);
+  --remi-accent-shadow: rgba(41, 121, 255, 0.35);
+}

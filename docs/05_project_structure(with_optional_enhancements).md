@@ -50,7 +50,10 @@ client/
     │   ├── client.ts       # Axios + auth interceptor
     │   ├── auth.ts
     │   ├── chat.ts         # fetch SSE streamMessage + REST
-    │   └── files.ts        # multipart upload
+    │   ├── files.ts        # multipart upload, deleteFile(), error parsing
+    │   └── rateLimit.ts    # 429 RateLimitError + retry_after
+    ├── constants/
+    │   └── uploadFormats.ts
     ├── components/
     │   ├── ChatbotWidget/
     │   │   ├── index.tsx           # State owner, routing
@@ -65,11 +68,15 @@ client/
     │   │   ├── streamSend.ts
     │   │   ├── MessageEditModal.tsx
     │   │   ├── FileUploadModal.tsx
+    │   │   ├── FileListItem.tsx      # File row + inline delete confirm
     │   │   ├── FileGenerationPanel.tsx
     │   │   ├── WidgetConversationDashboard.tsx
     │   │   ├── MobileTabBar.tsx
     │   │   ├── MobileConversationList.tsx
     │   │   ├── MobileFilesPanel.tsx
+    │   │   ├── NavTooltip.tsx
+    │   │   ├── RateLimitBanner.tsx
+    │   │   ├── RemiFace.tsx
     │   │   └── AssistantMarkdown.tsx
     │   └── SearchFilterPanel.tsx
     ├── hooks/
@@ -101,37 +108,48 @@ client/
 ```
 backend/
 ├── app/
-│   ├── main.py             # FastAPI app, CORS, routes, create_all
-│   ├── config.py           # pydantic-settings; reads repo-root .env.local
+│   ├── main.py             # FastAPI app, CORS, security headers, migrations
+│   ├── config.py           # SECRET_KEY, quota, cache settings
 │   ├── api/
 │   │   ├── v1/
 │   │   │   ├── auth.py
 │   │   │   ├── chat.py     # Active chat routes
-│   │   │   └── files.py
+│   │   │   ├── files.py    # upload, list, delete
+│   │   │   └── admin.py    # faiss-health
 │   │   ├── auth.py         # Legacy/unused — prefer api/v1
 │   │   ├── chat.py         # Legacy/unused — prefer api/v1
 │   │   └── conversations.py
 │   ├── core/
-│   │   └── security.py     # bcrypt + JWT (python-jose)
+│   │   ├── security.py     # bcrypt + JWT (python-jose)
+│   │   ├── network.py      # get_real_ip(), Cloudflare IP trust
+│   │   ├── mime_validation.py  # magic-byte MIME check
+│   │   └── sanitizer.py    # prompt-injection stripping
+│   ├── middleware/
+│   │   └── security_headers.py
 │   ├── database/
-│   │   └── db.py           # SQLAlchemy models + SessionLocal
+│   │   ├── db.py           # SQLAlchemy models + SessionLocal
+│   │   └── migrations/     # startup.py + Alembic versions/
 │   ├── schemas/            # Pydantic request/response models
 │   │   ├── user.py
 │   │   ├── conversation.py
 │   │   ├── message.py
-│   │   └── file.py
+│   │   ├── file.py
+│   │   └── audit_log.py
 │   └── services/
 │       ├── auth_service.py
-│       ├── chat_service.py       # LLM, RAG, SSE, PDF detect
-│       ├── vector_store_service.py
+│       ├── auth_rate_limit_service.py
+│       ├── audit_service.py
+│       ├── chat_service.py       # LLM, RAG, SSE, quota, sanitization
+│       ├── quota_service.py
+│       ├── response_cache.py     # per-user TTLCache
+│       ├── vector_store_service.py  # FAISS + versioning + delete cleanup
 │       └── file_parser_service.py
-├── tests/                  # 55 pytest tests
+├── tests/                  # 105 pytest tests
+│   ├── test_api_*.py
+│   ├── test_security_features.py
+│   ├── test_network.py
 │   ├── conftest.py
-│   ├── test_api_health.py
-│   ├── test_api_auth.py
-│   ├── test_api_chat.py
-│   ├── test_api_files.py
-│   └── test_api_edge_cases.py
+│   └── unit/               # sanitizer, cache, MIME, quota, audit, file delete, …
 ├── data/                   # Runtime (gitignored): uploads + vector_store
 ├── Dockerfile              # Railway/production image
 ├── railway.toml
@@ -139,14 +157,13 @@ backend/
 ├── requirements-docker.txt
 ├── requirements-ci.txt
 ├── pytest.ini
-├── alembic.ini             # Present; migrations folder not used — create_all on startup
+├── alembic.ini             # Optional; startup.py + create_all on boot
 └── README.md
 ```
 
 ### Intentionally absent in `backend/app/`
 
 - `langchain/`, `llm/`, `chains/`  
-- `middleware/` package (upload limit is in `main.py`)  
 - `models/` ORM package — models are in `database/db.py`  
 - `conversation_service.py` — logic is in `chat_service.py`  
 - Redis/Celery workers  
@@ -163,6 +180,7 @@ backend/
 | `03_features_capabilities.md` | Shipped vs not shipped |
 | `04_ml_ai_concepts.md` | RAG/LLM concepts |
 | `05_project_structure(...).md` | This file |
+| `06_Epics_User_stories_and_Use_cases.md` | Epics, user stories, use cases |
 | `07_deployment_guide.md` | Local + production deploy |
 
 ---
@@ -209,8 +227,13 @@ docker-compose.distributed.yml
 | File | Read by |
 |------|---------|
 | `.env.local` (repo root) | `backend/app/config.py`, Vite `envDir: '..'` |
-| `SECRET_KEY` | JWT signing (not `JWT_SECRET_KEY` from example) |
+| `SECRET_KEY` | **Required** JWT signing (min 32 chars; not `JWT_SECRET_KEY`) |
+| `ENVIRONMENT` | `development` / `production` (HSTS when production) |
 | `GEMINI_API_KEY` | Primary LLM |
+| `GEMINI_DAILY_QUOTA_PER_USER` | Daily Gemini calls per user (default 100) |
+| `RESPONSE_CACHE_*` | TTL response cache settings |
+| `AUTH_RATE_LIMIT_*` | Login/signup brute-force protection |
+| `CLOUDFLARE_ONLY` | Trust only Cloudflare origin IPs for `CF-Connecting-IP` |
 | `DATABASE_URL` | SQLAlchemy |
 | `CORS_ORIGINS` | FastAPI CORS |
 | `VITE_API_URL` | Frontend API base (build time) |

@@ -1,6 +1,18 @@
 import datetime
 from uuid import uuid4
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Index,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Text,
+    LargeBinary,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from app.config import settings
 
@@ -59,9 +71,26 @@ class UploadedFile(Base):
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)   # where you saved it on disk
     status = Column(String(50), default="pending")  # pending → processed
+    faiss_index_blob = Column(LargeBinary, nullable=True)
+    chunks_blob = Column(LargeBinary, nullable=True)
+    embedding_model_version = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="files")
+
+
+class GeminiDailyUsage(Base):
+    __tablename__ = "gemini_daily_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "usage_date", name="uq_gemini_usage_user_date"),
+        Index("ix_gemini_daily_usage_user_date", "user_id", "usage_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    usage_date = Column(String(10), nullable=False)  # YYYY-MM-DD UTC
+    call_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 # Dependency to get db session
 def get_db():

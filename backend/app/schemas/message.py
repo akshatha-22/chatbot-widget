@@ -17,3 +17,4 @@ class MessageResponse(MessageBase):
     has_pdf: bool = False
     pdf_content: Optional[str] = None
     pdf_filename: Optional[str] = None
+    cache_hit: bool = False

@@ -1,8 +1,11 @@
 from pathlib import Path
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field, computed_field, field_validator
+from pydantic import AliasChoices, Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Self
+
+_INSECURE_SECRET_PLACEHOLDER = "super-secret-key-change-in-production-12345"
+_TEST_SECRET_KEY = "ci-test-secret-key-not-for-production-min-32-chars"
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
@@ -67,10 +70,51 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Chatbot Widget API"
     API_V1_STR: str = "/api/v1"
 
-    # Security
-    SECRET_KEY: str = "super-secret-key-change-in-production-12345"
+    # Security — no insecure default; must be set via env (except automated tests).
+    ENVIRONMENT: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "APP_ENV"),
+    )
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
+
+    # Rate limiting / cost protection
+    GEMINI_DAILY_QUOTA_PER_USER: int = 100
+
+    # Auth brute-force protection (in-memory per IP)
+    AUTH_RATE_LIMIT_ENABLED: bool = True
+    AUTH_RATE_LIMIT_MAX_ATTEMPTS: int = 5
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+    # When True, only trust CF-Connecting-IP from known Cloudflare origin IPs.
+    CLOUDFLARE_ONLY: bool = False
+
+    # Response cache (in-process TTLCache — no Redis)
+    RESPONSE_CACHE_ENABLED: bool = True
+    RESPONSE_CACHE_TTL_SECONDS: int = 3600
+    RESPONSE_CACHE_MAX_SIZE: int = 500
+
+    @model_validator(mode="after")
+    def require_secret_key(self) -> Self:
+        env = (self.ENVIRONMENT or "development").strip().lower()
+        key = (self.SECRET_KEY or "").strip()
+
+        if key == _INSECURE_SECRET_PLACEHOLDER:
+            key = ""
+
+        if env in ("test", "testing"):
+            if not key or len(key) < 32:
+                object.__setattr__(self, "SECRET_KEY", _TEST_SECRET_KEY)
+            return self
+
+        if not key or len(key) < 32:
+            raise ValueError(
+                "SECRET_KEY must be set via environment (minimum 32 characters). "
+                "No insecure default is provided — add SECRET_KEY to .env.local."
+            )
+        object.__setattr__(self, "SECRET_KEY", key)
+        return self
 
     # Database
     DATABASE_URL: str = "sqlite:///./chatbot.db"

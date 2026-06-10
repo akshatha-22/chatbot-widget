@@ -1,28 +1,14 @@
-import { FileText, X, Check, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import type { Conversation, Message, UploadedFile } from '../../types'
 import FileGenerationPanel from './FileGenerationPanel'
-
-const FILE_TYPE_COLORS: Record<string, string> = {
-  pdf: '#EF4444',
-  doc: '#3B82F6',
-  docx: '#3B82F6',
-  xls: '#22C55E',
-  xlsx: '#22C55E',
-  csv: '#22C55E',
-  txt: '#8C8C8C',
-  md: '#8C8C8C',
-}
-
-function fileIconColor(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
-  return FILE_TYPE_COLORS[ext] ?? '#8C8C8C'
-}
+import FileListItem from './FileListItem'
 
 type MobileFilesPanelProps = {
   conversation: Conversation | null
   messages: Message[]
   files: UploadedFile[]
   onAddMore: () => void
+  onDeleteFile: (fileId: string) => Promise<void>
 }
 
 export default function MobileFilesPanel({
@@ -30,6 +16,7 @@ export default function MobileFilesPanel({
   messages,
   files,
   onAddMore,
+  onDeleteFile,
 }: MobileFilesPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAFAFA] touch-scroll">
@@ -38,7 +25,7 @@ export default function MobileFilesPanel({
           type="button"
           onClick={onAddMore}
           disabled={!conversation}
-          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[#F59E0B] py-3 text-sm font-medium text-white disabled:opacity-40 active:scale-[0.98] md:hover:bg-[#D97706]"
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[#2979FF] py-3 text-sm font-medium text-white disabled:opacity-40 active:scale-[0.98] md:hover:bg-[#1565C0]"
         >
           <Plus size={16} />
           Add More Files
@@ -61,37 +48,11 @@ export default function MobileFilesPanel({
             No files yet. Upload a PDF, DOCX, or TXT to chat with your documents.
           </p>
         ) : (
-          files.map((f) => {
-            const processed = f.status === 'processed'
-            const failed = f.status === 'failed'
-            const statusLabel = processed
-              ? 'Ready'
-              : failed
-                ? 'Failed'
-                : 'Processing…'
-            return (
-              <div
-                key={f.id}
-                className="mx-3 mb-2 flex min-h-[44px] items-center gap-3 rounded-xl border border-[#F0F0F0] bg-white px-4 py-3"
-              >
-                <FileText
-                  size={20}
-                  className="shrink-0"
-                  style={{ color: fileIconColor(f.filename) }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-[#1A1A1A]">
-                    {f.filename}
-                  </p>
-                  <p className="text-xs text-[#8C8C8C]">{statusLabel}</p>
-                </div>
-                {processed && (
-                  <Check size={16} className="shrink-0 text-green-500" />
-                )}
-                {failed && <X size={16} className="shrink-0 text-red-500" />}
-              </div>
-            )
-          })
+          <div className="mx-3 space-y-2">
+            {files.map((f) => (
+              <FileListItem key={f.id} file={f} onDelete={onDeleteFile} />
+            ))}
+          </div>
         )}
 
         <p className="mx-3 mt-4 pb-4 text-center text-xs text-[#8C8C8C]">

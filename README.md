@@ -31,9 +31,9 @@ This README reflects **what is in the repository today**, derived from the runni
 | **Frontend** (`client/`) | React SPA — no router; `App.tsx` renders only the widget |
 | **Backend** (`backend/app/`) | FastAPI REST + SSE streaming, JWT auth, RAG, LLM orchestration |
 | **Data** | SQLite by default; PostgreSQL via `DATABASE_URL` |
-| **Vector store** | Local FAISS indices + sentence-transformers embeddings on disk |
+| **Vector store** | FAISS + sentence-transformers when installed; chunks also stored in DB blobs + disk; in-memory index cache per process |
 
-There is **no** LangChain, Redis, Celery, WebSocket server, Kubernetes runtime, or safety/moderation pipeline in the live codebase.
+There is **no** LangChain, Redis, Celery, WebSocket server, or Kubernetes runtime in the live codebase. Prompt-injection sanitization, audit logging, and auth rate limiting **are** implemented (see [Auth & security](#auth--security)).
 
 ---
 
@@ -51,7 +51,7 @@ There is **no** LangChain, Redis, Celery, WebSocket server, Kubernetes runtime, 
 | lucide-react | Icons |
 | react-markdown + remark-gfm | Assistant message rendering |
 | jsPDF | Client-side PDF download |
-| Radix UI (`dropdown-menu`, `popover`) | Menus in chat & search filter |
+| Radix UI (`dropdown-menu`, `popover`, `tooltip`) | Menus, tooltips on nav buttons |
 
 ### Backend (`backend/app/`)
 
@@ -64,8 +64,10 @@ There is **no** LangChain, Redis, Celery, WebSocket server, Kubernetes runtime, 
 | google-genai | Primary Gemini client with Google Search grounding |
 | google-generativeai | Legacy Gemini fallback |
 | OpenAI SDK | Fallback when Gemini unavailable |
-| FAISS + sentence-transformers | RAG chunk storage & search |
+| FAISS + sentence-transformers | RAG embeddings & vector search (optional locally; required in Docker/Railway) |
+| cachetools | In-process TTL response cache (no Redis) |
 | PyPDF2, python-docx, openpyxl | File text extraction |
+| python-magic | Magic-byte MIME validation on uploads |
 
 ### Infrastructure
 
@@ -93,7 +95,10 @@ cd chatbot-widget
 
 # 2. Environment — repo root (shared by backend + Vite)
 cp .env.example .env.local
-# Edit .env.local and set GEMINI_API_KEY=your_key_here
+# Edit .env.local — minimum:
+#   GEMINI_API_KEY=your_key_here
+#   SECRET_KEY=<random-string-at-least-32-chars>   # required — no insecure default
+#   ENVIRONMENT=development
 
 # 3. Backend
 cd backend
@@ -147,13 +152,15 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 │  FastAPI (backend/app/main.py)                              │
 │  /api/v1/auth/*    signup, login, me                        │
 │  /api/v1/chat/*    conversations, messages, stream, generate│
-│  /api/v1/chat/conversations/{id}/files  upload + list       │
+│  /api/v1/chat/conversations/{id}/files  upload, list, delete│
+│  /api/v1/admin/faiss-health  per-user index version health  │
 └─────────┼───────────────────────────────────────────────────┘
           │
     ┌─────┴─────┬──────────────┐
     ▼           ▼              ▼
- SQLite/     FAISS on disk   Gemini (google-genai)
- PostgreSQL  (per file)     + OpenAI fallback
+ SQLite/     FAISS + chunks  Gemini (google-genai)
+ PostgreSQL  (DB blobs +     + OpenAI fallback
+             disk cache)      + TTL response cache
 ```
 
 ### Normal chat flow
@@ -172,9 +179,12 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 ### RAG flow
 
 1. User uploads PDF, DOCX, XLSX, or plain text to a conversation.
-2. Backend extracts text (`file_parser_service.py`), chunks and embeds it (`vector_store_service.py`), stores a FAISS index under `backend/data/vector_store/`.
-3. Indexing runs in a FastAPI `BackgroundTasks` worker (synchronous when `INLINE_FILE_PROCESSING=1` in tests).
-4. On each chat turn, top-k chunks are retrieved and injected into the LLM prompt.
+2. Backend validates MIME type + size, saves bytes to `backend/data/uploads/`, and queues embedding.
+3. `vector_store_service.py` chunks text, builds FAISS embeddings when ML libs are installed, and **persists index + chunks as binary blobs** on `uploaded_files` (survives Railway redeploys). Also caches indexes in memory per process and mirrors to `backend/data/vector_store/`.
+4. If FAISS/sentence-transformers are missing locally, chunks are stored with **keyword search fallback** so uploads still reach `processed`.
+5. Indexing runs in a FastAPI `BackgroundTasks` daemon thread (synchronous when `INLINE_FILE_PROCESSING=1` in tests).
+6. On each chat turn, top-k chunks are retrieved and injected into the LLM prompt. Stale FAISS indexes (embedding model version mismatch) are **auto-reindexed** before search.
+7. Repeated identical questions from the **same user** with the same RAG context can hit the **per-user TTL response cache** (no second Gemini call). Assistant responses include `cache_hit: true` when served from cache.
 
 ### LLM provider order
 
@@ -193,8 +203,11 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 
 | Feature | Implementation |
 | --- | --- |
-| **RemiLauncher + RemiSphere** | Floating animated launcher (Framer Motion) |
-| **RemiAvatar2D** | Flat mascot in headers and message bubbles |
+| **RemiLauncher + RemiSphere** | Floating animated launcher (dark charcoal sphere, electric-blue accents) |
+| **RemiAvatar2D / RemiFace** | Shared mascot in headers and message bubbles |
+| **NavTooltip** | Hover/tap hints on toolbar, tabs, and header buttons |
+| **RateLimitBanner** | Server-authoritative countdown when daily Gemini quota is exceeded (429 + `reset_at`) |
+| **FileListItem** | Per-file row with inline delete confirm + trash icon (desktop + mobile) |
 | **CompactWidget** | 350px bottom-right chat panel |
 | **ExpandedWidget** | Full workspace: sidebar, chat, files tab, generate tab |
 | **WidgetAuthPanel** | Login/signup inside the widget — host page stays untouched |
@@ -224,9 +237,11 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 
 | Feature | Implementation |
 | --- | --- |
-| **Upload** | PDF, DOCX, XLSX, TXT, MD, CSV and other text-readable formats |
-| **File list** | Expanded widget "Files" tab; status `pending` → `processed` / `failed` |
-| **RAG search** | FAISS L2 index per uploaded file |
+| **Upload** | PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG — max 100MB; file picker shows **all files** (validated after selection) |
+| **Upload modal** | Drag-and-drop, validation error banner, attach-badge file count in chat header |
+| **File list** | Expanded widget "Files" tab; status `pending` → `processed` / `failed`; polls every 1.5s while pending |
+| **File delete** | Trash icon → inline confirm → optimistic UI + `DELETE …/files/{id}`; removes disk, DB blobs, FAISS cache |
+| **RAG search** | FAISS L2 when available; keyword fallback otherwise; in-memory index cache; versioned embeddings |
 
 ### Document generation
 
@@ -241,9 +256,20 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | Feature | Implementation |
 | --- | --- |
 | **JWT sessions** | Token in `localStorage`; restored via `GET /auth/me` on mount |
+| **SECRET_KEY** | **Required** (min 32 chars) — app refuses to start without it (except `ENVIRONMENT=test`) |
+| **Security headers** | Six headers on every response via `SecurityHeadersMiddleware`; HSTS when `ENVIRONMENT=production` |
+| **Prompt sanitization** | `core/sanitizer.py` strips injection patterns before RAG/LLM; 400 if message is only injection content |
+| **Request body limits** | 1 MB for `/api/v1/chat/*` (messages); 52 MB for file upload routes (`main.py` middleware) |
+| **MIME validation** | Extension + Content-Type + first 512 bytes magic-byte check (`python-magic` + fallback) |
+| **Auth rate limiting** | In-memory sliding window per IP: 5 failed attempts/min on `/login` and `/signup` (separate scopes) |
+| **Audit logging** | `audit_logs` table; best-effort background logging on upload, message, generate, login, delete |
+| **Gemini daily quota** | 100 calls/user/day UTC calendar reset; 429 includes `retry_after_seconds` + `reset_at` |
+| **Response cache privacy** | Cache key scoped to `(user_id, normalized_question, rag_digest, use_search)` |
 | **Password hashing** | bcrypt |
-| **CORS** | Configured in `main.py` from `CORS_ORIGINS` env var |
-| **Per-user isolation** | Conversations and files scoped to authenticated user |
+| **CORS** | Configured in `main.py` from `CORS_ORIGINS` + optional Vercel preview regex |
+| **Per-user isolation** | Conversations and files scoped to authenticated user; file delete returns **403** for non-owners |
+| **Cloudflare IP trust** | `CLOUDFLARE_ONLY` validates `CF-Connecting-IP` against Cloudflare ranges; refreshed every 24h |
+| **Proxy-aware IP** | `get_real_ip()` for audit logs and rate limiting |
 
 ---
 
@@ -261,9 +287,10 @@ chatbot-widget/
 │   └── src/
 │       ├── main.tsx                 # Entry
 │       ├── App.tsx                  # Imports default export from FloatingWidget.tsx
-│       ├── api/                     # auth.ts, chat.ts, files.ts, client.ts
+│       ├── api/                     # auth.ts, chat.ts, files.ts, rateLimit.ts, client.ts
+│       ├── constants/uploadFormats.ts
 │       ├── components/
-│       │   ├── ChatbotWidget/       # 17 UI modules + streamSend.ts
+│       │   ├── ChatbotWidget/       # Widget UI + streamSend.ts, NavTooltip, RateLimitBanner, FileListItem
 │       │   └── SearchFilterPanel.tsx
 │       ├── hooks/useIsMobile.ts
 │       ├── types/index.ts
@@ -271,18 +298,25 @@ chatbot-widget/
 │       └── styles/                  # index.css, animations.css
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI app, CORS, PDF column migration
-│   │   ├── config.py                # Settings from .env.local
-│   │   ├── api/v1/                  # auth.py, chat.py, files.py
-│   │   ├── core/security.py         # JWT + bcrypt
-│   │   ├── database/db.py           # User, Conversation, Message, UploadedFile
+│   │   ├── main.py                  # FastAPI app, CORS, body limits, lifespan, migrations
+│   │   ├── config.py                # Settings (SECRET_KEY, quota, cache, auth rate limit)
+│   │   ├── api/v1/                  # auth.py, chat.py, files.py, admin.py
+│   │   ├── core/                    # security.py, network.py, mime_validation.py, sanitizer.py
+│   │   ├── middleware/              # security_headers.py
+│   │   ├── database/
+│   │   │   ├── db.py                # ORM models
+│   │   │   └── migrations/          # Alembic revision + idempotent startup.py
 │   │   ├── services/
-│   │   │   ├── chat_service.py      # Chat, stream, RAG, PDF intent, generate
+│   │   │   ├── chat_service.py      # Chat, stream, RAG, quota, sanitization
+│   │   │   ├── quota_service.py     # Per-user daily Gemini limit (UTC midnight)
+│   │   │   ├── response_cache.py    # Per-user TTLCache
+│   │   │   ├── auth_rate_limit_service.py  # Login/signup brute-force protection
+│   │   │   ├── audit_service.py     # Best-effort audit log writes
 │   │   │   ├── auth_service.py
 │   │   │   ├── file_parser_service.py
-│   │   │   └── vector_store_service.py
-│   │   └── schemas/                 # Pydantic request/response models
-│   ├── tests/                       # test_api_*.py (55 tests)
+│   │   │   └── vector_store_service.py  # FAISS + versioning + delete cleanup
+│   │   └── schemas/                 # Pydantic models + audit_log.py ORM
+│   ├── tests/                       # test_api_*.py + tests/unit/ (105 tests)
 │   ├── requirements.txt
 │   └── pytest.ini
 ├── package.json                     # npm workspace root
@@ -300,7 +334,10 @@ chatbot-widget/
 | `ExpandedWidget.tsx` | Full workspace with sidebar, files, generate panel |
 | `ChatInterface.tsx` | Message list, input, edit, PDF re-download |
 | `WidgetAuthPanel.tsx` | In-widget login/signup |
-| `FileUploadModal.tsx` | Drag-and-drop file upload |
+| `FileUploadModal.tsx` | Drag-and-drop upload; no `accept` filter; validation errors |
+| `FileListItem.tsx` | File row with status, inline delete confirm, trash icon |
+| `NavTooltip.tsx` / `RateLimitBanner.tsx` | Button hints; quota countdown (`reset_at`) |
+| `constants/uploadFormats.ts` | Shared supported extensions + 100MB limit |
 | `FileGenerationPanel.tsx` | AI summary/report/analysis + client exports |
 | `WidgetConversationDashboard.tsx` | Browse and search conversations |
 | `MobileTabBar.tsx` / `MobileConversationList.tsx` / `MobileFilesPanel.tsx` | Mobile expanded layout |
@@ -335,16 +372,26 @@ Copy `.env.example` → `.env.local` at the **repo root**. Both backend (`config
 | `GEMINI_MODEL` | No | `gemini-2.5-flash` | Gemini model name |
 | `OPENAI_API_KEY` | No | `""` | Fallback LLM |
 | `OPENAI_MODEL` | No | `gpt-3.5-turbo` | OpenAI model name |
-| `SECRET_KEY` | Prod | dev placeholder | JWT signing — **the code reads `SECRET_KEY`, not `JWT_SECRET_KEY`** |
+| `SECRET_KEY` | **Yes** (min 32 chars) | none — app fails to start | JWT signing — **not** `JWT_SECRET_KEY` |
+| `ENVIRONMENT` | No | `development` | Use `production` on Railway (enables HSTS header) |
 | `DATABASE_URL` | No | `sqlite:///./chatbot.db` | SQLAlchemy connection (relative to backend cwd) |
+| `GEMINI_DAILY_QUOTA_PER_USER` | No | `100` | Max Gemini calls per user per UTC day (`0` = unlimited) |
+| `RESPONSE_CACHE_ENABLED` | No | `true` | TTL cache for identical questions |
+| `RESPONSE_CACHE_TTL_SECONDS` | No | `3600` | Cache entry lifetime (seconds) |
+| `RESPONSE_CACHE_MAX_SIZE` | No | `500` | Max cached responses in memory |
 | `CORS_ORIGINS` | No | localhost/127.0.0.1 Vite ports | Comma-separated allowed origins |
-| `VITE_API_URL` | No | `http://localhost:8000` | Frontend API base URL |
+| `CORS_ORIGIN_REGEX` | No | `https://.*\.vercel.app` | Preview deploy origin regex |
+| `CLOUDFLARE_ONLY` | No | `false` | When `true`, only trust `CF-Connecting-IP` from Cloudflare origin IPs |
+| `AUTH_RATE_LIMIT_ENABLED` | No | `true` | Per-IP login/signup brute-force protection |
+| `AUTH_RATE_LIMIT_MAX_ATTEMPTS` | No | `5` | Max failed auth attempts per IP per window |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | No | `60` | Sliding window length (seconds) |
+| `VITE_API_URL` | No | `http://localhost:8000` | Frontend API base URL (baked at Vercel build time) |
 
 ### Not used by the running app
 
 These appear in `.env.example` but have **no corresponding code** in `backend/app/`:
 
-`VITE_WS_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `RATE_LIMIT_*`, `AWS_*`, `SMTP_*`, `SENTRY_DSN`, and most other backend placeholders.
+`VITE_WS_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `RATE_LIMIT_*` (legacy; app uses `GEMINI_DAILY_QUOTA_PER_USER` and `AUTH_RATE_LIMIT_*`), `AWS_*`, `SMTP_*`, `SENTRY_DSN`, and most other `.env.example` placeholders.
 
 > **Security:** Never commit `.env.local`. Rotate `SECRET_KEY` and API keys before production.
 
@@ -364,8 +411,8 @@ All chat and file routes require: `Authorization: Bearer <token>`
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/auth/signup` | Register `{ email, password }` |
-| `POST` | `/auth/login` | Returns `{ access_token, token_type }` |
+| `POST` | `/auth/signup` | Register `{ email, password }`; rate-limited per IP |
+| `POST` | `/auth/login` | Returns `{ access_token, token_type }`; rate-limited per IP |
 | `GET` | `/auth/me` | Current user profile |
 
 ### Chat (`/chat`)
@@ -379,7 +426,7 @@ All chat and file routes require: `Authorization: Bearer <token>`
 | `DELETE` | `/chat/conversations/{id}` | Delete conversation (cascades messages & files) |
 | `GET` | `/chat/conversations/{id}/messages` | Message history (oldest first) |
 | `POST` | `/chat/conversations/{id}/messages` | Send message (returns user + assistant) |
-| `POST` | `/chat/conversations/{id}/messages/stream` | Stream assistant reply (SSE) |
+| `POST` | `/chat/conversations/{id}/messages/stream` | Stream assistant reply (SSE); may return **429** if daily Gemini quota exceeded |
 | `POST` | `/chat/conversations/{id}/generate` | AI summary/report/analysis export |
 
 ### Files (`/chat/conversations/{id}/files`)
@@ -388,6 +435,20 @@ All chat and file routes require: `Authorization: Bearer <token>`
 | --- | --- | --- |
 | `POST` | `/chat/conversations/{id}/files` | Upload file (multipart); queues RAG indexing |
 | `GET` | `/chat/conversations/{id}/files` | List uploaded files |
+| `DELETE` | `/chat/conversations/{id}/files/{file_id}` | Delete file, vectors, and disk copy (403 if not owner) |
+
+### Admin (`/admin`, JWT required)
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/admin/faiss-health` | Current user's files: `embedding_model_version`, `stale` flag |
+
+### Assistant message fields
+
+| Field | When |
+| --- | --- |
+| `cache_hit` | `true` when assistant reply came from per-user response cache |
+| `has_pdf`, `pdf_content`, `pdf_filename` | Chat PDF intent detected |
 
 ### PDF fields on assistant messages
 
@@ -417,7 +478,7 @@ venv\Scripts\python.exe -m pytest tests/ -v
 python -m pytest tests/ -v
 ```
 
-**55 tests** in `test_api_*.py`. No live LLM calls — `conftest.py` clears API keys and mocks FAISS indexing on uploads.
+**105 tests** in `backend/tests/` (API integration + `tests/unit/` for sanitizer, cache, MIME magic, auth rate limit, audit, FAISS versioning, file delete). No live LLM calls — `conftest.py` clears API keys and mocks FAISS indexing on uploads by default.
 
 See `backend/tests/README.md` for fixture details.
 
@@ -455,9 +516,19 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 ### Production notes
 
 - Set `SECRET_KEY`, `GEMINI_API_KEY`, and `DATABASE_URL` (PostgreSQL recommended) on **Railway**.
-- Set `VITE_API_URL` to your **Railway** public API URL on Vercel (e.g. `https://your-service.up.railway.app`).
-- Add your Vercel domain to `CORS_ORIGINS` on the backend.
-- FAISS indices and uploads are stored on local disk (`backend/data/`). Ephemeral filesystems (some free tiers) will lose RAG indexes on redeploy — use persistent disk or external storage for production RAG.
+- Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
+- Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
+- Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
+- FAISS indices and text chunks are **persisted in PostgreSQL** (`uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`) so Railway redeploys do not wipe RAG.
+- Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
+
+### Production checklist
+
+- [ ] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
+- [ ] Railway: `CORS_ORIGINS` includes your Vercel URL
+- [ ] Vercel: `VITE_API_URL` = Railway HTTPS URL; production redeploy completed
+- [ ] Smoke test: signup → chat → upload → delete file
+- [ ] `curl.exe -sS -D - -o NUL https://YOUR-API/health` shows security headers + HSTS
 
 ---
 
@@ -467,7 +538,14 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | --- | --- |
 | **"Loading chat…" stuck** | Ensure backend is running; refresh after login. Check browser console for API errors. |
 | **CORS errors** | Add your frontend origin to `CORS_ORIGINS` — include both `localhost` and `127.0.0.1` variants |
-| **Gemini quota / 429** | Check [AI Studio billing](https://aistudio.google.com/apikey); model fallbacks will retry alternate Gemini models |
+| **Gemini quota / 429** | App enforces **100 Gemini calls/user/day**; UI countdown uses server `reset_at`. Resets at UTC midnight. |
+| **Login/signup 429** | Auth rate limit (5 failed attempts/min per IP). Wait 60s or tune `AUTH_RATE_LIMIT_*`. |
+| **Widget calls localhost in prod** | Set `VITE_API_URL` on Vercel and **redeploy** frontend |
+| **301 on Railway curl** | Use `https://` prefix: `curl.exe -sS https://your-api.up.railway.app/health` |
+| **Security headers missing on prod** | Set `ENVIRONMENT=production` and redeploy latest backend from `main` |
+| **Backend won't start** | Set `SECRET_KEY` (32+ random chars) in `.env.local` — no default is provided |
+| **Upload shows "Failed — try again"** | Install full backend deps: `pip install -r requirements.txt` (needs `faiss-cpu`, `sentence-transformers`). Fallback keyword search works without them but embedding must succeed for `processed`. |
+| **File picker hides files** | Fixed: picker shows all files; unsupported types show a red validation message after selection |
 | **No AI responses** | Verify `GEMINI_API_KEY` in `.env.local`; restart backend after env changes |
 | **PDF not downloading** | Use phrasing with "pdf" + a verb (generate/create/export); check browser download permissions |
 | **`npm ci` EPERM on Windows** | Stop `npm run dev` first (Vite locks `esbuild.exe`) |
@@ -483,5 +561,6 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Last updated:** May 2026  
-**Status:** Production-oriented widget with chat, RAG, PDF generation, and CI/CD. Codebase trimmed to live runtime paths only.
+**Last updated:** June 2026  
+**Status:** Production-oriented widget with chat, RAG (versioned DB-persisted indexes), audit logging, auth rate limiting, file delete, per-user response cache, Gemini quota, and CI/CD (Railway + Vercel).
+

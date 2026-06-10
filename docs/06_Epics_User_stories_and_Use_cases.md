@@ -19,13 +19,16 @@ User stories describe specific features from the user's perspective, following t
 *   **User Story 1.1**: As a user, I want to be able to upload PDF documents so that I can interact with their content.
 *   **User Story 1.2**: As a user, I want to be able to upload plain text (TXT) files so that I can interact with their content.
 *   **User Story 1.3**: As a user, I want to see a clear indication (e.g., a loading spinner or success message) when my file is being processed, so that I know the system is working.
-*   **User Story 1.4**: As a user, I want the system to handle errors gracefully if I upload an unsupported file format, so that I understand what went wrong.
+*   **User Story 1.4**: As a user, I want the system to handle errors gracefully if I upload an unsupported file format, so that I understand what went wrong. *(Shipped: client validation banner + server MIME check 415; file picker shows all files.)*
+*   **User Story 1.5**: As a user, I want uploaded document indexes to survive server redeploys, so I do not have to re-upload after every Railway restart. *(Shipped: `faiss_index_blob` + `chunks_blob` in PostgreSQL.)*
+*   **User Story 1.6**: As a user, I want to delete an uploaded file I no longer need, so that it is removed from my conversation and storage. *(Shipped: `DELETE .../files/{id}` + `FileListItem` inline confirm + optimistic UI.)*
 
 ### Epic 2: Conversational Interface
 
 *   **User Story 2.1**: As a user, I want a clean and intuitive chat interface where I can type my questions.
 *   **User Story 2.2**: As a user, I want to see the history of my conversation with the chatbot, so that I can refer back to previous questions and answers.
 *   **User Story 2.3**: As a user, I want the chatbot's responses to be clearly distinguishable from my own messages.
+*   **User Story 2.4**: As a user, I want my login credentials protected from brute-force attacks, so that my account remains secure. *(Shipped: auth rate limiting — 5 failed attempts/min per IP on login and signup.)*
 
 ### Epic 3: Contextual Understanding and Retrieval
 

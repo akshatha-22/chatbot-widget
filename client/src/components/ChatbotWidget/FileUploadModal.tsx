@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import {
   UploadCloud,
   FileText,
@@ -9,11 +9,14 @@ import {
 } from 'lucide-react'
 import type { UploadedFile } from '../../types'
 import { uploadFile } from '../../api/files'
+import {
+  getUploadExtension,
+  MAX_UPLOAD_BYTES,
+  SUPPORTED_UPLOAD_LABEL,
+  type SupportedUploadExtension,
+} from '../../constants/uploadFormats'
 
-const MAX_FILE_BYTES = 100 * 1024 * 1024
 const MAX_FILES_PER_BATCH = 10
-const SUPPORTED_EXTS = ['pdf', 'txt', 'docx', 'xlsx', 'md'] as const
-type SupportedExt = (typeof SUPPORTED_EXTS)[number]
 
 type UploadRow = {
   id: string
@@ -31,15 +34,11 @@ function formatBytes(bytes: number): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-function getExt(fileName: string): SupportedExt | null {
-  const parts = fileName.split('.')
-  const ext = (parts[parts.length - 1] || '').trim().toLowerCase()
-  return SUPPORTED_EXTS.includes(ext as SupportedExt) ? (ext as SupportedExt) : null
-}
-
-function pickFileIcon(ext: SupportedExt) {
-  if (ext === 'xlsx') return <FileSpreadsheet size={18} className="text-indigo-500" />
-  return <FileText size={18} className="text-indigo-500" />
+function pickFileIcon(ext: SupportedUploadExtension) {
+  if (ext === 'xlsx' || ext === 'xls') {
+    return <FileSpreadsheet size={18} className="text-[#2979FF]" />
+  }
+  return <FileText size={18} className="text-[#2979FF]" />
 }
 
 export interface FileUploadModalProps {
@@ -60,20 +59,26 @@ export default function FileUploadModal({
   const [rows, setRows] = useState<UploadRow[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploadingBatch, setUploadingBatch] = useState(false)
+  const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const [dragActive, setDragActive] = useState(false)
 
-  const acceptAttr = useMemo(() => '.pdf,.txt,.docx,.xlsx,.md', [])
-
-  const validateFiles = (files: File[]): { ok: File[]; errors: string[] } => {
+  const validateFiles = (fileList: File[]): { ok: File[]; errors: string[] } => {
     const ok: File[] = []
     const errors: string[] = []
-    for (const f of files) {
-      const ext = getExt(f.name)
+    for (const f of fileList) {
+      const ext = getUploadExtension(f.name)
       if (!ext) {
-        errors.push(`${f.name}: unsupported format`)
+        errors.push(
+          `${f.name}: unsupported format. Use ${SUPPORTED_UPLOAD_LABEL.split('—')[0].trim()}.`,
+        )
         continue
       }
-      if (f.size > MAX_FILE_BYTES) {
-        errors.push(`${f.name}: exceeds 100MB`)
+      if (f.size > MAX_UPLOAD_BYTES) {
+        errors.push(`${f.name}: exceeds 100MB limit`)
+        continue
+      }
+      if (f.size <= 0) {
+        errors.push(`${f.name}: file is empty`)
         continue
       }
       ok.push(f)
@@ -82,9 +87,10 @@ export default function FileUploadModal({
     return { ok, errors }
   }
 
-  const addFiles = async (files: File[]) => {
-    if (!files.length) return
-    const { ok } = validateFiles(files)
+  const addFiles = async (fileList: File[]) => {
+    if (!fileList.length) return
+    const { ok, errors } = validateFiles(fileList)
+    setValidationErrors(errors)
     if (!ok.length) return
 
     setUploadingBatch(true)
@@ -123,9 +129,7 @@ export default function FileUploadModal({
     }
   }
 
-  const handleFilesSelected = async (
-    e: ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleFilesSelected = async (e: ChangeEvent<HTMLInputElement>) => {
     const list = e.target.files
     if (!list) return
     await addFiles(Array.from(list))
@@ -135,8 +139,9 @@ export default function FileUploadModal({
   const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
+    setDragActive(false)
     const list = e.dataTransfer.files
-    if (!list) return
+    if (!list?.length) return
     await addFiles(Array.from(list))
   }
 
@@ -166,9 +171,7 @@ export default function FileUploadModal({
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-gray-800">Upload files</div>
-            <div className="mt-0.5 text-xs text-gray-500">
-              PDF, TXT, DOCX, XLSX, MD — Max 100MB
-            </div>
+            <div className="mt-0.5 text-xs text-gray-500">{SUPPORTED_UPLOAD_LABEL}</div>
           </div>
           <button
             type="button"
@@ -183,35 +186,73 @@ export default function FileUploadModal({
 
         <div className="overflow-y-auto p-4 touch-scroll max-md:max-h-[70vh]">
           <div
+            onDragEnter={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setDragActive(true)
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setDragActive(false)
+            }}
             onDragOver={(e) => {
               e.preventDefault()
               e.stopPropagation()
+              setDragActive(true)
             }}
             onDrop={handleDrop}
-            className={`flex h-36 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 md:h-auto md:rounded-lg md:p-6 ${
+            className={`flex h-36 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed md:h-auto md:rounded-lg md:p-6 ${
+              dragActive
+                ? 'border-[#2979FF] bg-[#E3F2FD]'
+                : 'border-gray-200'
+            } ${
               uploadingBatch
                 ? 'opacity-60'
-                : 'active:bg-gray-50 md:hover:border-indigo-400 md:hover:bg-indigo-50'
+                : 'active:bg-gray-50 md:hover:border-[#2979FF] md:hover:bg-[#E3F2FD]'
             }`}
             onClick={() => inputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
             role="button"
             tabIndex={0}
           >
-            <UploadCloud size={22} className="text-indigo-500" />
+            <UploadCloud size={22} className="text-[#2979FF]" />
             <div className="text-sm font-medium text-gray-800">
               Drag &amp; drop files here or tap to browse
             </div>
-            <div className="text-xs text-gray-500">You can upload multiple files.</div>
+            <div className="px-4 text-center text-xs text-gray-500">
+              All files appear in the picker — unsupported types show an error after
+              selection. Max 100MB per file.
+            </div>
           </div>
 
+          {/* No accept filter: Windows/macOS show every file; we validate after pick. */}
           <input
             ref={inputRef}
             type="file"
-            accept={acceptAttr}
             className="hidden"
             multiple
             onChange={handleFilesSelected}
           />
+
+          {validationErrors.length > 0 && (
+            <div
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              role="alert"
+            >
+              <p className="font-semibold">Some files could not be added:</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5">
+                {validationErrors.map((err) => (
+                  <li key={err}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {rows.length > 0 && (
             <div className="mt-4">
@@ -220,14 +261,18 @@ export default function FileUploadModal({
               </div>
               <div className="space-y-2">
                 {rows.map((r) => {
-                  const ext = getExt(r.file.name)
+                  const ext = getUploadExtension(r.file.name)
                   const status = rowStatus(r)
                   return (
                     <div
                       key={r.id}
                       className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
                     >
-                      {ext ? pickFileIcon(ext) : <FileText size={18} className="text-indigo-500" />}
+                      {ext ? (
+                        pickFileIcon(ext)
+                      ) : (
+                        <FileText size={18} className="text-[#2979FF]" />
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-medium text-gray-800">
                           {r.file.name}
@@ -236,15 +281,15 @@ export default function FileUploadModal({
                           {formatBytes(r.file.size)}
                         </div>
                         {r.uploading && (
-                          <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-[#1565C0]">
                             <Loader2 size={14} className="animate-spin" />
                             Uploading…
                           </div>
                         )}
                         {!r.uploading && status === 'pending' && (
-                          <div className="mt-1 flex items-center gap-1 text-xs text-amber-500">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-blue-500">
                             <span
-                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-500 border-t-transparent"
+                              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"
                               aria-hidden
                             />
                             Processing…

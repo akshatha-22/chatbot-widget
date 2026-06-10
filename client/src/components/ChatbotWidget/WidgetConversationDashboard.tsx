@@ -181,7 +181,7 @@ export default function WidgetConversationDashboard({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search conversations"
-              className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-3 text-base outline-none focus:border-indigo-400 md:py-2 md:text-sm"
+              className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-9 pr-3 text-base outline-none focus:border-[#2979FF] md:py-2 md:text-sm"
             />
           </div>
           <SearchFilterPanel
@@ -205,7 +205,7 @@ export default function WidgetConversationDashboard({
                 onClick={() => setCategory(cat)}
                 className={`min-h-[44px] shrink-0 rounded-full px-3 py-1.5 text-xs font-medium active:opacity-80 ${
                   category === cat
-                    ? 'bg-[#F59E0B] text-white'
+                    ? 'bg-[#2979FF] text-white'
                     : 'bg-gray-100 text-gray-600'
                 }`}
               >

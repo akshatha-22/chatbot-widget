@@ -1,0 +1,51 @@
+/* Remi electric-blue accent utilities */
+
+.remi-accent-bg {
+  background-color: var(--remi-accent);
+}
+
+.remi-accent-bg:hover,
+.remi-accent-hover:hover {
+  background-color: var(--remi-accent-hover);
+}
+
+.remi-accent-text {
+  color: var(--remi-accent);
+}
+
+.remi-accent-text-hover:hover {
+  color: var(--remi-accent-hover);
+}
+
+.remi-accent-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--remi-accent-soft), 0 0 0 4px var(--remi-accent-glow);
+}
+
+.remi-accent-soft-bg {
+  background-color: var(--remi-accent-soft);
+}
+
+.remi-send-btn {
+  background-color: var(--remi-accent);
+  color: #ffffff;
+  transition: background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.remi-send-btn:hover:not(:disabled) {
+  background-color: var(--remi-accent-hover);
+}
+
+.remi-send-btn:active:not(:disabled) {
+  background-color: var(--remi-accent-active);
+  transform: scale(0.98);
+}
+
+.remi-send-btn:disabled {
+  opacity: 0.5;
+}
+
+.remi-focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--remi-accent-glow);
+}

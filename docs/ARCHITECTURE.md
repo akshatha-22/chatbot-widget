@@ -2,7 +2,7 @@
 
 Technical deep-dive for the **chatbot-widget** monorepo (`client/` + `backend/`). This document is grounded in the running code with file paths and line references. For diagrams and product overview, see also [01_system_overview.md](./01_system_overview.md) and [02_architecture_diagrams.md](./02_architecture_diagrams.md).
 
-**Last aligned with codebase:** main branch (post mobile-responsiveness + folder filters).
+**Last aligned with codebase:** June 2026 (security sprint: sanitization, audit logs, auth rate limit, MIME magic bytes, body limits, per-user cache, FAISS versioning, file delete UI, Cloudflare IP trust).
 
 ---
 
@@ -11,7 +11,7 @@ Technical deep-dive for the **chatbot-widget** monorepo (`client/` + `backend/`)
 1. [Message request lifecycle](#1-message-request-lifecycle)
 2. [RAG pipeline](#2-rag-pipeline-end-to-end)
 3. [Gemini fallback chain](#3-gemini-unavailable--fallback-chain)
-4. [FAISS on disk](#4-faiss-vector-index-on-disk)
+4. [FAISS vector storage](#4-faiss-vector-storage-db--disk--memory)
 5. [SSE streaming](#5-sse-streaming-architecture)
 6. [Widget state (compact / expanded)](#6-widget-state-compact--expanded)
 7. [Database schema](#7-database-schema)
@@ -85,11 +85,12 @@ def stream_and_save_assistant(
 | 5 | `BackgroundTasks.add_task(_run_embedding_background)` | 127–131 |
 | 6 | Daemon `threading.Thread` → `process_file_embedding` | 61–69, 22–58 |
 | 7 | `file_parser_service.extract_text` | `file_parser_service.py` 3–52 |
-| 8 | `vector_store_service.chunk_and_store` | `vector_store_service.py` 73–96 |
-| 9 | `split_text` (chunk_size=500; overlap param unused) | 23–70 |
-| 10 | `SentenceTransformer("all-MiniLM-L6-v2")` + FAISS `IndexFlatL2` | 13–20, 86–87 |
-| 11 | Write `{file_id}.index` + `{file_id}.chunks` | 91–96 |
-| 12 | `status="processed"` + commit | `files.py` 37–40 |
+| 8 | `validate_upload_mime` | `core/mime_validation.py` |
+| 9 | `vector_store_service.chunk_and_store(..., db=db)` | `vector_store_service.py` |
+| 10 | `split_text` (chunk_size=500) → FAISS embed **or** text-only fallback | `vector_store_service.py` |
+| 11 | Persist `faiss_index_blob` + `chunks_blob` on `uploaded_files` | `db.py`, `vector_store_service.py` |
+| 12 | Mirror to disk + in-memory `_index_memory_cache` | `vector_store_service.py` |
+| 13 | `status="processed"` + commit | `files.py` |
 
 ### Chat → retrieval
 
@@ -125,20 +126,21 @@ When `GEMINI_API_KEY` is empty, `_gemini_configured()` is false (`config.py` 126
 
 ---
 
-## 4. FAISS vector index on disk
+## 4. FAISS vector storage (DB + disk + memory)
 
-**Directory:** `backend/data/vector_store/` (`vector_store_service.py` 6–8)
+**Primary persistence (survives Railway redeploy):** `uploaded_files.faiss_index_blob` and `uploaded_files.chunks_blob` in PostgreSQL/SQLite (`db.py`).
 
-**Per upload (`file_id` = UUID string):**
+**Disk fallback:** `backend/data/vector_store/{file_id}.index` + `{file_id}.chunks`
 
-| File | Contents |
-|------|----------|
-| `{file_id}.index` | FAISS `IndexFlatL2` written via `faiss.write_index` |
-| `{file_id}.chunks` | Pickle of text chunk list |
+**In-process cache:** `_index_memory_cache` — each `file_id` loaded once per worker restart (`vector_store_service.py`).
 
-**Upload binary:** `backend/data/uploads/{file_id}{ext}` (`files.py` 96–99)
+**Upload binary:** `backend/data/uploads/{file_id}{ext}` (`files.py`)
 
-**Search metric:** L2 distance on `all-MiniLM-L6-v2` embeddings; results merged across files, sorted by distance, deduplicated (`vector_store_service.py` 99–151).
+**Embedding path:** When `faiss` + `sentence-transformers` are installed → `IndexFlatL2` + `all-MiniLM-L6-v2` embeddings.
+
+**Dev fallback:** If ML stack is missing, chunks are stored without FAISS; `search()` uses keyword overlap (`_simple_chunk_search`).
+
+**Search metric:** L2 distance when FAISS available; otherwise keyword scoring. Results merged across files, deduplicated.
 
 ---
 
@@ -189,7 +191,7 @@ def format_sse_done(assistant_message: Message) -> str:
 
 ## 7. Database schema
 
-Defined in `backend/app/database/db.py`. Tables created via `Base.metadata.create_all` in `main.py` (11).
+Defined in `backend/app/database/db.py`. Tables created via `Base.metadata.create_all` in `main.py`, with idempotent column/index patches in `database/migrations/startup.py`.
 
 ### `users`
 
@@ -233,7 +235,33 @@ Defined in `backend/app/database/db.py`. Tables created via `Base.metadata.creat
 | conversation_id | FK | **CASCADE** |
 | filename, file_path | String | |
 | status | String(50) | pending → processed / failed |
+| faiss_index_blob | LargeBinary nullable | Serialized FAISS index |
+| chunks_blob | LargeBinary nullable | Pickled text chunks |
+| embedding_model_version | String nullable | e.g. `all-MiniLM-L6-v2`; drives stale detection |
 | created_at | DateTime | |
+
+### `audit_logs`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| user_id | FK → users.id nullable | **SET NULL** on user delete |
+| action | String(100) | e.g. `login`, `file_upload`, `file_delete` |
+| ip_address | String(45) nullable | From `get_real_ip()` |
+| metadata_json | Text nullable | JSON blob |
+| created_at | DateTime | |
+
+### `gemini_daily_usage`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| user_id | FK → users.id | **CASCADE** |
+| usage_date | String(10) | `YYYY-MM-DD` UTC |
+| call_count | Integer | Incremented per Gemini call |
+| created_at | DateTime | |
+
+Unique on `(user_id, usage_date)`.
 
 ---
 
@@ -244,8 +272,8 @@ BackgroundTasks → _run_embedding_background → daemon Thread → process_file
 ```
 
 - Uses a **separate** `SessionLocal()` session (`files.py` 25–57)  
-- **Server restart:** daemon thread is killed; no job queue; row may stay `pending`; partial FAISS files possible  
-- **Tests:** `INLINE_FILE_PROCESSING=1` runs embedding synchronously (`files.py` 122–125; `conftest.py` 63–66)
+- **Server restart:** daemon thread is killed; row may stay `pending` — re-upload or re-embed. **Indexed data in DB blobs survives redeploy.**  
+- **Tests:** `INLINE_FILE_PROCESSING=1` runs embedding synchronously (`files.py`; `conftest.py`)
 
 ---
 
@@ -270,22 +298,90 @@ Password hashing: **bcrypt** directly in `backend/app/core/security.py` (not pas
 - **Per-file embedding** in threads + CPU-bound `SentenceTransformer`  
 - **FAISS** index loaded per search per file — no shared in-memory service  
 - Long-lived **SSE** connections per active chat  
-- **No rate limiting** in application code  
-- Single-process Uvicorn unless horizontally scaled with shared DB + vector store
+- **Per-user Gemini quota** (100/day UTC) limits LLM cost abuse  
+- **Auth rate limiting** (in-memory per IP on login/signup) and **response cache** are per-process — not shared across Railway replicas  
+- Single-process Uvicorn unless horizontally scaled with shared DB (vector blobs in DB)
 
 ---
 
 ## 11. Security & configuration (critical)
 
-### JWT `SECRET_KEY` (Q11)
+### JWT `SECRET_KEY` (required)
 
-```70:73:backend/app/config.py
-    SECRET_KEY: str = "super-secret-key-change-in-production-12345"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
-```
+`config.py` has **no insecure default**. `SECRET_KEY` must be set via environment (minimum 32 characters). The app **refuses to start** without it, except when `ENVIRONMENT=test` (pytest sets a test key in `conftest.py`).
 
-If `SECRET_KEY` is missing from the environment, the app **still starts** using this default. **Override in production.**
+Also set `ENVIRONMENT=production` on Railway to enable `Strict-Transport-Security`.
+
+### Security headers middleware
+
+`SecurityHeadersMiddleware` (`middleware/security_headers.py`) attaches on every response:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy` (camera, microphone, geolocation, payment disabled)
+- `X-XSS-Protection: 0`
+- `Strict-Transport-Security` (production only)
+
+### Prompt sanitization
+
+`core/sanitizer.py` strips common injection patterns from user messages before RAG/LLM. If the message is only injection content after sanitization, `chat_service` returns **400**. Sanitization events are logged at info level.
+
+### Request body size limits
+
+`main.py` middleware enforces per-route caps: **1 MB** on `/api/v1/chat/*` message routes; **52 MB** on file upload routes. Oversize requests return **413**.
+
+### MIME validation on upload
+
+`validate_upload_mime()` in `core/mime_validation.py` runs before save:
+
+1. Extension + declared Content-Type allowlist  
+2. First **512 bytes** magic-byte check via `python-magic` (with fallback heuristics)
+
+Rejects mismatches with **415**. Supports PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG.
+
+### Auth rate limiting
+
+`auth_rate_limit_service.py` — in-memory sliding window per client IP:
+
+- Separate scopes: `login:` and `signup:`  
+- Default: **5** failed attempts per **60** seconds (`AUTH_RATE_LIMIT_*`)  
+- Returns **429** with `Retry-After` when exceeded  
+- Successful login/signup clears the scope for that IP
+
+### Audit logging
+
+`audit_service.py` writes to `audit_logs` table (best-effort, background). Hooks in `auth.py`, `chat.py`, `files.py` for login, signup, message send/stream, generate, upload, file delete. Failures do not block the request.
+
+### Gemini daily quota (cost protection)
+
+`quota_service.py` tracks `GeminiDailyUsage` per user per **UTC calendar day**. Default limit: **100** (`GEMINI_DAILY_QUOTA_PER_USER`). Checked in `chat_service.ensure_gemini_quota()` before Gemini calls. Cached responses skip quota consumption.
+
+Returns **429** with JSON `detail.retry_after_seconds`, `detail.reset_at`, and `Retry-After` header.
+
+### Response cache (no Redis)
+
+`response_cache.py` uses `cachetools.TTLCache` (default TTL 3600s, max 500 entries). Cache key = `(user_id, normalized_question, rag_digest, use_search)` — prevents cross-user cache bleed. Assistant `MessageResponse` includes `cache_hit: true` when served from cache.
+
+### FAISS index versioning
+
+`uploaded_files.embedding_model_version` tracks the model used to build each index. `vector_store_service.py` auto-reindexes stale blobs before search. `GET /api/v1/admin/faiss-health` (JWT, user-scoped) reports per-file version and `stale` flag.
+
+### File delete
+
+`DELETE /api/v1/chat/conversations/{id}/files/{file_id}` in `files.py`:
+
+1. `require_conversation_access()` — **403** if JWT user is not conversation owner (other routes still use **404**)  
+2. DB row deleted and committed first  
+3. `delete_file_data()` removes disk file, in-memory FAISS cache, and vector store mirror
+
+Frontend: `FileListItem.tsx` — trash icon, inline confirm, optimistic remove in `ExpandedWidget.tsx` / `MobileFilesPanel.tsx`.
+
+### Proxy-aware client IP + Cloudflare
+
+`get_real_ip()` in `core/network.py` reads `CF-Connecting-IP`, `True-Client-IP`, `X-Real-IP`, `X-Forwarded-For`.
+
+When `CLOUDFLARE_ONLY=true`, only trusts `CF-Connecting-IP` from IPs in Cloudflare published ranges. Ranges are fetched on startup and refreshed every **24h** in `main.py` lifespan.
 
 ### Conversation ownership (Q16)
 
@@ -335,10 +431,12 @@ Assistant streaming does **not** commit per chunk — only one commit when the f
 
 All `/api/v1/chat/*` and `GET /api/v1/auth/me` require `get_current_user`.
 
-### File upload validation (Q13, Q17)
+### File upload validation
 
-- **Size:** 100MB — `files.py` 16, 90–94; middleware 413 in `main.py` 40–48  
-- **Type:** No extension allowlist on upload; parser supports pdf, docx, xlsx/xls, else UTF-8 text (`file_parser_service.py`). `.exe` / `.py` may upload but typically fail parsing → `status="failed"`.
+- **Size:** 100MB per file — `files.py`; **52 MB** request body cap on upload route (`main.py` middleware → 413)  
+- **MIME:** Extension + Content-Type + magic bytes in `mime_validation.py` (415 on unsupported types)  
+- **Delete:** `DELETE .../files/{id}` — see [File delete](#file-delete) above  
+- **Frontend:** `FileUploadModal.tsx` shows all files in picker (no `accept` filter); validates after selection via `constants/uploadFormats.ts`; `FileListItem.tsx` for delete UX
 
 ### SQL injection (Q14)
 
@@ -412,13 +510,24 @@ See [§6](#6-widget-state-compact--expanded). Entry: `App.tsx` → `FloatingWidg
 
 **`close()` does not abort** (265–268) — stream may continue until completion if the widget is only hidden.
 
-### File polling (Q34)
+### File polling
 
-`index.tsx` 143–172:
+`index.tsx`:
 
-- Interval: **3000 ms**  
+- Interval: **1500 ms** while any file is `pending`  
 - Stops: no `pending` files, fetch error, **5 minute** timeout, effect cleanup  
-- If server never sets `processed`, UI can show `pending` indefinitely after timeout stops polling
+
+### Nav tooltips & file count in chat
+
+- `NavTooltip.tsx` + `WidgetTooltipProvider` — Radix tooltips on header/toolbar/tab buttons  
+- Chat header pill shows uploaded file count; **0 files** opens upload modal; **1+** navigates to Files panel  
+- `RateLimitBanner.tsx` — countdown on 429 from `client/src/api/rateLimit.ts`
+
+### Upload & file list UX
+
+- `FileUploadModal.tsx` — drag-and-drop, validation error banner; supported: PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG  
+- `FileListItem.tsx` — status badge, trash icon, inline delete confirm; calls `deleteFile()` in `api/files.ts`  
+- `ExpandedWidget.tsx` / `MobileFilesPanel.tsx` — optimistic file removal + toast on success
 
 ### Message edit (Q38)
 
@@ -463,15 +572,28 @@ See [§6](#6-widget-state-compact--expanded). Entry: `App.tsx` → `FloatingWidg
 
 ## 15. Tests & coverage gaps
 
-### Test modules (55 tests total)
+### Test modules (105 tests total)
 
-| File | Tests | Focus |
-|------|-------|-------|
-| `backend/tests/test_api_health.py` | 2 | `/`, `/health` |
-| `backend/tests/test_api_auth.py` | 8 | signup, login, me |
-| `backend/tests/test_api_chat.py` | 11 | conversations, messages, stream |
-| `backend/tests/test_api_files.py` | 3 | upload, list |
-| `backend/tests/test_api_edge_cases.py` | 31 | edge cases, mocks |
+| File | Focus |
+|------|-------|
+| `backend/tests/test_api_health.py` | `/`, `/health` |
+| `backend/tests/test_api_auth.py` | signup, login, me |
+| `backend/tests/test_api_chat.py` | conversations, messages, stream |
+| `backend/tests/test_api_files.py` | upload, list |
+| `backend/tests/test_api_edge_cases.py` | isolation, PDF, generate, RAG mocks |
+| `backend/tests/test_security_features.py` | security headers, MIME, quota 429 |
+| `backend/tests/test_network.py` | `get_real_ip` proxy headers |
+| `backend/tests/unit/test_sanitizer.py` | prompt injection stripping |
+| `backend/tests/unit/test_response_cache.py` | per-user cache keys, `cache_hit` |
+| `backend/tests/unit/test_mime_validation.py` | magic-byte validation |
+| `backend/tests/unit/test_request_body_limits.py` | 1 MB / 52 MB middleware |
+| `backend/tests/unit/test_quota_service.py` | UTC reset, `reset_at` |
+| `backend/tests/unit/test_audit_service.py` | audit log writes |
+| `backend/tests/unit/test_auth_rate_limit.py` | login/signup 429 |
+| `backend/tests/unit/test_vector_store_versioning.py` | embedding version + reindex |
+| `backend/tests/unit/test_admin_faiss_health.py` | `/admin/faiss-health` |
+| `backend/tests/unit/test_file_delete.py` | delete atomicity, 403 non-owner |
+| `backend/tests/unit/test_network.py` | Cloudflare IP validation |
 
 ### `conftest.py` autouse mocks
 
@@ -482,10 +604,10 @@ See [§6](#6-widget-state-compact--expanded). Entry: `App.tsx` → `FloatingWidg
 
 ### Gaps (Q47–49)
 
-- No dedicated unit tests for real FAISS / `sentence-transformers` load  
+- No dedicated tests for real FAISS / `sentence-transformers` load (mocked in API tests)  
 - No corrupted-PDF fixture tests  
-- No frontend tests for stream abort on widget close  
-- RAG tested via mocked `vector_store_service.search` in edge cases
+- No frontend tests for stream abort on widget close or file delete UI  
+- In-memory auth rate limit / response cache not tested under multi-replica deployment
 
 ### Remove `GEMINI_API_KEY` (Q50)
 
@@ -499,10 +621,12 @@ App starts; chat uses OpenAI if configured, else `_fallback_assistant_content` �
 |-------|----------|-------|
 | Widget `close()` does not abort SSE | Medium | Fix: call `abortActiveStream()` in `close()` |
 | `chunk_overlap` unused in `split_text` | Low | Parameter exists but not applied |
-| Default `SECRET_KEY` in repo | High (prod) | Must set env on Railway/production |
-| Embedding jobs lost on restart | Medium | Consider queue (Redis/Celery) for production |
+| Embedding jobs lost on restart | Low–Medium | DB blobs survive; `pending` rows may need re-embed |
+| ML libs missing locally | Info | Text-only chunk fallback; install `requirements.txt` for full RAG |
 | Message edit creates duplicate user rows | Low | `sendMessage` POST adds new user message server-side |
 | Archived/Trash client-only | Info | Not synced across devices |
+| In-memory rate limit + cache per replica | Medium | Use Redis when scaling Railway horizontally |
+| Sentry / admin RBAC | Low | `SENTRY_DSN` unused; `faiss-health` is user-scoped only |
 
 ---
 
@@ -512,8 +636,13 @@ App starts; chat uses OpenAI if configured, else `_fallback_assistant_content` �
 |------|----------------|
 | API entry | `backend/app/main.py`, `backend/app/api/v1/` |
 | Chat / LLM | `backend/app/services/chat_service.py` |
-| RAG | `backend/app/services/vector_store_service.py`, `file_parser_service.py` |
-| Auth | `backend/app/services/auth_service.py`, `backend/app/core/security.py` |
+| RAG | `vector_store_service.py`, `file_parser_service.py` |
+| Quota / cache | `quota_service.py`, `response_cache.py` |
+| Security | `core/sanitizer.py`, `core/mime_validation.py`, `core/network.py`, `middleware/security_headers.py` |
+| Auth / audit | `auth_service.py`, `auth_rate_limit_service.py`, `audit_service.py`, `core/security.py` |
+| Admin | `backend/app/api/v1/admin.py` |
+| Migrations | `database/migrations/startup.py`, `versions/20250603_0001_*.py` |
+| File delete UI | `client/src/components/ChatbotWidget/FileListItem.tsx`, `api/files.ts` |
 | Models | `backend/app/database/db.py` |
 | Widget shell | `client/src/components/ChatbotWidget/index.tsx` |
 | Streaming client | `client/src/api/chat.ts`, `streamSend.ts` |

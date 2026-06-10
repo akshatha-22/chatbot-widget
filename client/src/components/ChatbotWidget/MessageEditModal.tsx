@@ -129,7 +129,7 @@ export default function MessageEditModal({
               }
               if (e.key === 'Escape') onClose()
             }}
-            className="min-h-[140px] w-full max-h-[320px] resize-none rounded-lg border border-gray-200 px-3 py-2 text-base outline-none focus:border-indigo-400 md:text-sm"
+            className="min-h-[140px] w-full max-h-[320px] resize-none rounded-lg border border-gray-200 px-3 py-2 text-base outline-none focus:border-[#2979FF] md:text-sm"
           />
         </div>
 
@@ -172,7 +172,7 @@ export default function MessageEditModal({
                 type="button"
                 onClick={handleSend}
                 disabled={sending || !conversationId || !text.trim()}
-                className="min-h-[44px] flex-1 rounded-lg bg-indigo-500 px-3 py-2.5 text-sm text-white active:opacity-90 disabled:opacity-40 md:flex-none md:hover:bg-indigo-600 flex items-center justify-center gap-1.5"
+                className="min-h-[44px] flex-1 rounded-lg bg-[#2979FF] px-3 py-2.5 text-sm text-white active:opacity-90 disabled:opacity-40 md:flex-none md:hover:bg-[#1565C0] flex items-center justify-center gap-1.5"
               >
                 <Send size={16} />
                 {sending ? 'Sending…' : 'Send'}

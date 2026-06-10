@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import os
+
+# Must be set before app.config loads Settings (no insecure SECRET_KEY default).
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault(
+    "SECRET_KEY",
+    "ci-test-secret-key-not-for-production-min-32-chars",
+)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,6 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 from app.database.db import Base, get_db
+from app.schemas import audit_log  # noqa: F401 — register audit_logs model
 from app.main import app
 
 # In-memory SQLite — isolated per test, no files on disk.
@@ -58,6 +68,7 @@ def patch_background_db_session(db_engine, monkeypatch):
     """Background file tasks must use the same DB as the TestClient override."""
     bg_session = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     monkeypatch.setattr("app.api.v1.files.SessionLocal", bg_session)
+    monkeypatch.setattr("app.services.audit_service.SessionLocal", bg_session)
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +82,16 @@ def disable_external_llm_keys(monkeypatch):
     """Keep chat tests deterministic — use local fallback, no live API calls."""
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+
+
+@pytest.fixture(autouse=True)
+def clear_auth_rate_limits():
+    """Isolate auth rate-limit counters per test."""
+    from app.services import auth_rate_limit_service
+
+    auth_rate_limit_service.clear_rate_limits()
+    yield
+    auth_rate_limit_service.clear_rate_limits()
 
 
 @pytest.fixture(autouse=True)

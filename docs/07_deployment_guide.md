@@ -16,7 +16,7 @@ How to run and deploy **Remi** using the **actual** stack in this repository.
 | Frontend | **Vercel** (static `client/dist`) | Vite `npm run dev` :5173 |
 | Backend | **Railway** (`backend/Dockerfile`, `railway.toml`) | Uvicorn :8000 |
 | Database | Managed **PostgreSQL** | **SQLite** (`sqlite:///./chatbot.db`) |
-| Vector / uploads | **Local disk** on API server | `backend/data/` |
+| Vector / uploads | **PostgreSQL blobs** + optional disk cache | `backend/data/` |
 
 **Not required:** Redis, RabbitMQ, Kubernetes, Docker Compose (root `docker-compose.yml` is empty).
 
@@ -31,71 +31,24 @@ How to run and deploy **Remi** using the **actual** stack in this repository.
 | npm | 9+ |
 | Gemini API key | [Google AI Studio](https://aistudio.google.com/apikey) |
 
-PostgreSQL and Redis are **optional** for local development.
-
 ---
 
 ## 3. Local development
 
-### 3.1 Environment
-
-Copy env at **repo root** (shared by backend and Vite):
-
-```bash
-cp .env.example .env.local
-```
-
-Minimum for AI replies:
+See [README Quick Start](../README.md#quick-start). Minimum `.env.local`:
 
 ```env
 GEMINI_API_KEY=your_key_here
+SECRET_KEY=your-random-string-at-least-32-characters-long
+ENVIRONMENT=development
 DATABASE_URL=sqlite:///./chatbot.db
 VITE_API_URL=http://localhost:8000
-SECRET_KEY=change-me-to-a-long-random-string
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-> Backend reads `SECRET_KEY`, not `JWT_SECRET_KEY` from the example file.
-
-### 3.2 Backend
-
-```bash
-cd backend
-python -m venv venv
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Verify:
-
-- http://127.0.0.1:8000/health → `{"status":"healthy"}`
-- http://127.0.0.1:8000/docs → OpenAPI UI
-
-Tables are created automatically via `Base.metadata.create_all` in `main.py` (no Alembic migration folder shipped).
-
-### 3.3 Frontend
-
-From repo root:
-
-```bash
-npm ci
-npm run dev
-```
-
-Open http://127.0.0.1:5173 — sign up inside the widget.
-
-**No Vite proxy:** the browser calls `VITE_API_URL` directly; CORS must allow your dev origin.
-
-### 3.4 Windows notes
-
-- Stop `npm run dev` before `npm ci` if `esbuild.exe` is locked (EPERM).
-- Use PowerShell `;` instead of `&&` if chaining commands fails.
-
 ---
 
-## 4. Production: Vercel (frontend)
+## 4. Production: Frontend (Vercel)
 
 ### 4.1 Build settings
 
@@ -109,82 +62,96 @@ Root `vercel.json`:
 }
 ```
 
-Deploy from the **repository root** so install sees the workspace `package-lock.json`.
-
 ### 4.2 Environment variables (Vercel dashboard)
 
 | Variable | Required | Example |
 |----------|----------|---------|
-| `VITE_API_URL` | Yes | `https://your-service.up.railway.app` (your Railway public URL) |
+| `VITE_API_URL` | Yes | `https://chatbot-widgetclient-production.up.railway.app` |
 
 Rules:
 
 - Use **https**, no trailing slash.
 - Set on **Production** (and Preview if you test PRs).
-- Redeploy after changing — value is baked at build time via `vite.config.ts` `define`.
+- **Redeploy after changing** — value is baked at build time.
 
-### 4.3 Monorepo upload limit
+### 4.3 GitHub Actions deploy
 
-If deploy fails with too many files, use root `.vercelignore` (already in repo) to exclude `backend/data`, `.ci-venv`, etc.
+`.github/workflows/deploy.yml` deploys frontend after CI on `main`. Requires secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_URL`.
 
 ---
 
 ## 5. Production: Backend (Railway)
 
-The API is deployed on **Railway**, not Render. Connect this repository in the [Railway dashboard](https://railway.app) and set the service root to `backend/` (or deploy using the Dockerfile).
-
 | File | Purpose |
 |------|---------|
-| `backend/Dockerfile` | Production image (CPU torch, `requirements-docker.txt`) |
-| `backend/railway.toml` | Railway build/deploy config |
-| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| `backend/Dockerfile` | Production image |
+| `backend/railway.toml` | Build/deploy config, `/health` check |
 
-### 5.1 Railway setup
+### 5.1 Railway variables (required)
 
-1. Create a Railway project and link this GitHub repo.
-2. Add a **PostgreSQL** plugin (recommended for production).
-3. Set service variables (see §7), including:
-   - `DATABASE_URL` (Railway provides this for Postgres; `postgres://` is auto-normalized to `postgresql://`)
-   - `GEMINI_API_KEY`
-   - `SECRET_KEY` (strong random value)
-   - `CORS_ORIGINS` — your production Vercel URL(s), e.g. `https://remi-zeta-nine.vercel.app`
-4. Deploy; copy the public HTTPS URL (e.g. `https://….up.railway.app`).
-5. Set that URL as `VITE_API_URL` on Vercel and redeploy the frontend.
+| Variable | Example / notes |
+|----------|-----------------|
+| `SECRET_KEY` | Strong random string (min 32 chars) — **generate new for prod** |
+| `ENVIRONMENT` | `production` (enables HSTS) |
+| `GEMINI_API_KEY` | Google AI Studio key |
+| `DATABASE_URL` | From Railway **PostgreSQL** plugin |
+| `CORS_ORIGINS` | `https://your-app.vercel.app` |
 
-Optional: default `CORS_ORIGIN_REGEX` in `config.py` already allows `https://.*\.vercel.app` preview deployments.
+### 5.2 Railway variables (recommended)
 
-> **Note:** `.github/workflows/deploy.yml` only deploys the **frontend** to Vercel. Backend deploys happen on Railway when you push to the connected branch (or via Railway CLI).
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `GEMINI_DAILY_QUOTA_PER_USER` | `100` | `0` = unlimited |
+| `AUTH_RATE_LIMIT_ENABLED` | `true` | Per-IP login/signup protection |
+| `AUTH_RATE_LIMIT_MAX_ATTEMPTS` | `5` | |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Sliding window |
+| `CLOUDFLARE_ONLY` | `false` | Set `true` if API is behind Cloudflare |
 
-### 5.2 Persistent disk
+### 5.3 Verify deployment
 
-Uploads and FAISS indices live under `backend/data/`:
+**Health body** (use `https://`):
 
-- `data/uploads/`
-- `data/vector_store/`
+```powershell
+curl.exe -sS "https://YOUR-RAILWAY-URL.up.railway.app/health"
+```
 
-On ephemeral containers, **uploads are lost on redeploy** unless you attach persistent volume or move to object storage (not implemented in code).
+Expect: `{"status":"healthy"}`
+
+**Security headers** (`/health` supports GET only, not HEAD):
+
+```powershell
+curl.exe -sS -D - -o NUL "https://YOUR-RAILWAY-URL.up.railway.app/health"
+```
+
+With `ENVIRONMENT=production` and latest backend deployed, expect:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
+
+If headers are missing, redeploy from latest `main` and confirm `ENVIRONMENT=production`.
+
+### 5.4 Schema & migrations
+
+On startup:
+
+1. `Base.metadata.create_all()` creates tables (including `audit_logs`)
+2. `app/database/migrations/startup.py` applies idempotent column/index patches
+3. Optional: `alembic upgrade head` using `app/database/migrations/versions/20250603_0001_*.py`
+
+FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`.
 
 ---
 
-## 6. Database
+## 6. End-to-end production smoke test
 
-### SQLite (local only)
-
-```env
-DATABASE_URL=sqlite:///./chatbot.db
-```
-
-File is created relative to the **backend working directory** when you start uvicorn from `backend/`.
-
-### PostgreSQL (production)
-
-```env
-DATABASE_URL=postgresql://user:pass@host:5432/dbname
-```
-
-`config.py` normalizes `postgres://` → `postgresql://` for SQLAlchemy.
-
-No migration scripts in repo — schema comes from `create_all` on startup. For existing production DBs, coordinate schema changes manually or add Alembic later.
+1. Open Vercel production URL (not localhost).
+2. Sign up / log in inside widget.
+3. Send a chat message — streaming reply.
+4. Upload a `.txt` file — wait for **Ready**.
+5. Delete the file from Files panel — confirm inline, see success toast.
+6. DevTools → Network: API calls hit Railway HTTPS URL.
+7. Console: no CORS errors.
 
 ---
 
@@ -194,18 +161,27 @@ No migration scripts in repo — schema comes from `create_all` on startup. For 
 
 | Variable | Required prod | Default / notes |
 |----------|---------------|-----------------|
-| `SECRET_KEY` | **Yes** | Dev placeholder in code if unset — **must override in prod** |
-| `GEMINI_API_KEY` | For real AI | Empty → fallback messages |
+| `SECRET_KEY` | **Yes** (min 32 chars) | No default |
+| `ENVIRONMENT` | `production` | `development` |
+| `GEMINI_API_KEY` | For real AI | Empty → fallback |
 | `GEMINI_MODEL` | No | `gemini-2.5-flash` |
+| `GEMINI_DAILY_QUOTA_PER_USER` | No | `100` |
+| `RESPONSE_CACHE_ENABLED` | No | `true` |
+| `RESPONSE_CACHE_TTL_SECONDS` | No | `3600` |
+| `RESPONSE_CACHE_MAX_SIZE` | No | `500` |
+| `AUTH_RATE_LIMIT_ENABLED` | No | `true` |
+| `AUTH_RATE_LIMIT_MAX_ATTEMPTS` | No | `5` |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | No | `60` |
+| `CLOUDFLARE_ONLY` | No | `false` |
 | `OPENAI_API_KEY` | No | Fallback LLM |
-| `DATABASE_URL` | No | `sqlite:///./chatbot.db` |
-| `CORS_ORIGINS` | No | Localhost Vite ports |
+| `DATABASE_URL` | Postgres recommended | `sqlite:///./chatbot.db` |
+| `CORS_ORIGINS` | Prod Vercel URL | Localhost Vite ports |
 | `CORS_ORIGIN_REGEX` | No | `https://.*\.vercel.app` |
 | `VITE_API_URL` | Frontend build | `http://localhost:8000` |
 
 ### In `.env.example` but **not used** by app
 
-`REDIS_URL`, `VITE_WS_URL`, `JWT_SECRET_KEY`, `AWS_*`, `SMTP_*`, `RATE_LIMIT_*`, etc.
+`REDIS_URL`, `VITE_WS_URL`, `JWT_SECRET_KEY`, `AWS_*`, `SMTP_*`, `SENTRY_DSN`, legacy `RATE_LIMIT_*`, etc.
 
 ---
 
@@ -213,42 +189,21 @@ No migration scripts in repo — schema comes from `create_all` on startup. For 
 
 ### CI (`.github/workflows/ci.yml`)
 
-On push/PR to `main` / `develop`:
-
-1. Backend: `pip install -r requirements-ci.txt`, `pytest` in `backend/`
-2. Frontend: `npm ci`, `npm run type-check`, `npm run build`
+- Backend: `pytest tests/` (105 tests)
+- Frontend: `npm run type-check`, `npm run build`
 
 ### Deploy (`.github/workflows/deploy.yml`)
 
-After successful CI on `main`:
-
-1. **Frontend:** Vercel production deploy with `VITE_API_URL` from secrets (must point to your **Railway** API URL).
-
-**Backend** is **not** deployed by this workflow — Railway deploys from its own GitHub integration or manual deploy.
-
-Required GitHub secrets for frontend deploy:
-
-| Secret | Purpose |
-|--------|---------|
-| `VERCEL_TOKEN` | Vercel CLI |
-| `VERCEL_ORG_ID` | Vercel team |
-| `VERCEL_PROJECT_ID` | Vercel project |
-| `VITE_API_URL` | Railway API HTTPS URL for frontend build |
+- Frontend → Vercel (after CI on `main`)
+- Backend → Railway separately (GitHub integration or `railway up`)
 
 ---
 
 ## 9. CORS checklist
 
-Production errors often look like:
-
-> Access to fetch … has been blocked by CORS policy
-
-Fix:
-
-1. Add exact Vercel URL to Railway `CORS_ORIGINS`, e.g.  
-   `https://remi-zeta-nine.vercel.app`
-2. Include both `localhost` and `127.0.0.1` variants for local dev.
-3. Preview deployments match default regex `https://.*\.vercel.app` unless disabled.
+1. Add exact Vercel production URL to Railway `CORS_ORIGINS`.
+2. Include `localhost` and `127.0.0.1` variants for local dev.
+3. Preview deploys match default `CORS_ORIGIN_REGEX` (`https://.*\.vercel.app`).
 
 ---
 
@@ -257,77 +212,51 @@ Fix:
 | Endpoint | Response |
 |----------|----------|
 | `GET /health` | `{"status":"healthy"}` |
-| `GET /` | Welcome JSON |
+| `GET /` | Welcome JSON + docs link |
 
-**Not implemented:** Prometheus metrics, structured logging service, Sentry (unless you add it).
+**Not implemented:** Prometheus, Sentry (unless you add it), structured log shipping.
 
-Use platform logs (Vercel for frontend, Railway for API) for errors. Backend prints `[RAG]`, `[EMBED]`, `[FAISS]` diagnostic lines to stdout.
+Use Railway logs for `[RAG]`, `[EMBED]`, `[FAISS]`, sanitization info lines.
 
 ---
 
-## 11. Scaling & performance
+## 11. Scaling notes
 
 | Concern | Guidance |
 |---------|----------|
-| Concurrent users | Prefer PostgreSQL; scale API replicas; note FAISS is local per instance |
-| Large uploads | 100MB cap; embedding is CPU-heavy |
-| Gemini quota | Users see fallback text mentioning quota / API key |
-| SSE | Long-lived connections; configure platform timeout > chat duration |
-
-Horizontal scaling **without shared disk** means each replica has its own FAISS files — uploads on instance A are invisible on B unless you use shared storage.
+| In-memory rate limit / cache | Per Railway replica — upgrade to Redis when `numReplicas > 1` |
+| FAISS | Indexes in Postgres blobs; memory cache per process |
+| Auth rate limit | Set `AUTH_RATE_LIMIT_ENABLED=false` temporarily if debugging lockouts |
 
 ---
 
 ## 12. Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `ERR_CONNECTION_REFUSED` on :8000 | API not running | Start uvicorn from `backend/` |
-| Postgres auth failed on start | Bad `DATABASE_URL` | Use SQLite locally or fix credentials |
-| CORS error from Vercel | Origin not allowed | Update `CORS_ORIGINS` on API |
-| Widget calls `localhost:8000` in prod | `VITE_API_URL` not set at build | Set in Vercel, redeploy |
-| File stuck `pending` | Embedding failed or server restarted | Check API logs; re-upload |
-| Chat returns fallback text | Missing/invalid `GEMINI_API_KEY` | Set key, restart API |
-| `npm ci` fails on Vercel | Wrong root directory | Deploy from monorepo root |
-| Stream continues after close | Known gap | `close()` does not abort — see ARCHITECTURE.md |
+| Symptom | Fix |
+|---------|-----|
+| `301` on curl without `https://` | Use `curl.exe -sS https://...` |
+| Wrong health JSON (`RDF AB Challenge`, etc.) | Wrong Railway service URL — use Remi API URL |
+| Widget calls `localhost:8000` in prod | Set `VITE_API_URL` on Vercel, **redeploy** |
+| CORS error | Add Vercel URL to Railway `CORS_ORIGINS` |
+| No security headers | `ENVIRONMENT=production` + redeploy latest backend |
+| Login 429 | Auth rate limit — wait 60s |
+| Gemini 429 | Daily quota — UI uses `reset_at` from server |
 
 ---
 
-## 13. Optional: Docker (scaffold)
+## 13. Pre-production checklist
 
-`backend/Dockerfile` is used for Railway deploys. Additional files under `docker/` are **samples** — not the primary path in CI. Root `docker-compose.yml` and `docker-compose.prod.yml` are **empty** placeholders.
-
-To experiment locally with Docker:
-
-```bash
-# Build from backend folder — see Dockerfile for context
-docker build -f backend/Dockerfile -t remi-api ./backend
-```
-
-Ensure `GEMINI_API_KEY`, `SECRET_KEY`, and `DATABASE_URL` are passed at runtime.
-
----
-
-## 14. Optional: Kubernetes
-
-Manifests under `docker/kubernetes/` are **not** maintained as the production deployment path. Use only if you operate your own cluster and adapt env/volumes for `backend/data`.
-
----
-
-## 15. Pre-production checklist
-
-- [ ] `SECRET_KEY` is a strong random value (not default)  
-- [ ] `GEMINI_API_KEY` set on API host  
-- [ ] `DATABASE_URL` points to PostgreSQL  
-- [ ] `CORS_ORIGINS` includes production Vercel URL  
-- [ ] `VITE_API_URL` on Vercel matches API HTTPS URL  
-- [ ] Persistent volume or accept ephemeral uploads  
-- [ ] GitHub secrets set for deploy workflow  
-- [ ] Smoke test: signup → chat → upload → RAG question  
+- [ ] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
+- [ ] Railway: `CORS_ORIGINS` = Vercel production URL
+- [ ] Vercel: `VITE_API_URL` = Railway HTTPS URL; redeploy completed
+- [ ] `curl.exe -sS https://API/health` → `{"status":"healthy"}`
+- [ ] Security headers visible on `/health`
+- [ ] Smoke: signup → chat → upload → delete file
 
 ---
 
 ## Related
 
-- [01_system_overview.md](./01_system_overview.md)  
-- [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md)  
+- [01_system_overview.md](./01_system_overview.md)
+- [03_features_capabilities.md](./03_features_capabilities.md)
+- [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md)

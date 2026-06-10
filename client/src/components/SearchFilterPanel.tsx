@@ -85,7 +85,7 @@ export default function SearchFilterPanel({
                   setDraft((p) => ({ ...p, text: clampText(e.target.value) }))
                 }
                 placeholder="Title contains…"
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 pr-9 text-base outline-none focus:border-indigo-400 md:text-sm"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 pr-9 text-base outline-none focus:border-[#2979FF] md:text-sm"
               />
               {draft.text.trim().length > 0 && (
                 <button
@@ -112,7 +112,7 @@ export default function SearchFilterPanel({
                     dateRange: e.target.value as DateRangePreset,
                   }))
                 }
-                className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-indigo-400"
+                className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-[#2979FF]"
               >
                 <option value="last30">Last 30 days</option>
                 <option value="last7">Last 7 days</option>
@@ -134,7 +134,7 @@ export default function SearchFilterPanel({
                     onChange={(e) =>
                       setDraft((p) => ({ ...p, customFrom: e.target.value || undefined }))
                     }
-                    className="mt-1 w-full text-sm rounded-lg border border-gray-200 px-2 py-2 outline-none focus:border-indigo-400"
+                    className="mt-1 w-full text-sm rounded-lg border border-gray-200 px-2 py-2 outline-none focus:border-[#2979FF]"
                   />
                 </div>
                 <div>
@@ -145,7 +145,7 @@ export default function SearchFilterPanel({
                     onChange={(e) =>
                       setDraft((p) => ({ ...p, customTo: e.target.value || undefined }))
                     }
-                    className="mt-1 w-full text-sm rounded-lg border border-gray-200 px-2 py-2 outline-none focus:border-indigo-400"
+                    className="mt-1 w-full text-sm rounded-lg border border-gray-200 px-2 py-2 outline-none focus:border-[#2979FF]"
                   />
                 </div>
                 {draft.customFrom &&
@@ -236,7 +236,7 @@ export default function SearchFilterPanel({
         <button
           type="button"
           disabled={!canApply}
-          className="min-h-[44px] flex-1 rounded-xl bg-[#F59E0B] py-2.5 text-sm font-medium text-white active:opacity-90 disabled:opacity-50 md:rounded-lg md:bg-indigo-500 md:hover:bg-indigo-600"
+          className="min-h-[44px] flex-1 rounded-xl bg-[#2979FF] py-2.5 text-sm font-medium text-white active:opacity-90 disabled:opacity-50 md:rounded-lg md:bg-[#2979FF] md:hover:bg-[#1565C0]"
           onClick={() => {
             onApply(draft)
             setOpen(false)

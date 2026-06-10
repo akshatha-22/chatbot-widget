@@ -40,8 +40,11 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5173,
-    host: '127.0.0.1',
+    host: true,
     open: true,
+    watch: {
+      ignored: ['**/dist/**'],
+    },
   },
   build: {
     outDir: 'dist',

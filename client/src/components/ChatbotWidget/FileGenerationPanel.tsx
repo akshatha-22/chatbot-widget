@@ -162,7 +162,7 @@ export default function FileGenerationPanel({
               value={genType}
               onChange={(e) => setGenType(e.target.value as GenerateType)}
               disabled={!canUse || busy}
-              className="flex-1 rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#F59E0B]/30 disabled:opacity-50"
+              className="flex-1 rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#2979FF]/30 disabled:opacity-50"
             >
               {GENERATE_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
@@ -174,7 +174,7 @@ export default function FileGenerationPanel({
               value={outFormat}
               onChange={(e) => setOutFormat(e.target.value as OutputFormat)}
               disabled={!canUse || busy}
-              className="rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#F59E0B]/30 disabled:opacity-50"
+              className="rounded-lg border border-[#F0F0F0] bg-white px-3 py-2 text-base outline-none focus:ring-2 focus:ring-[#2979FF]/30 disabled:opacity-50"
             >
               {OUTPUT_FORMATS.map((f) => (
                 <option key={f.value} value={f.value}>
@@ -187,7 +187,7 @@ export default function FileGenerationPanel({
             type="button"
             onClick={() => void handleGenerate()}
             disabled={!canUse || busy}
-            className="min-h-[44px] w-full rounded-lg bg-[#F59E0B] py-2.5 text-sm font-medium text-white active:scale-[0.98] disabled:opacity-50 md:hover:bg-[#D97706]"
+            className="min-h-[44px] w-full rounded-lg bg-[#2979FF] py-2.5 text-sm font-medium text-white active:scale-[0.98] disabled:opacity-50 md:hover:bg-[#1565C0]"
           >
             {generating ? 'Generating…' : 'Generate'}
           </button>
@@ -268,7 +268,7 @@ export default function FileGenerationPanel({
                 AI summary, report, or analysis via Gemini.
               </div>
             </div>
-            <Sparkles size={18} className="text-indigo-500" />
+            <Sparkles size={18} className="text-[#2979FF]" />
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-3">
@@ -279,7 +279,7 @@ export default function FileGenerationPanel({
                   value={genType}
                   onChange={(e) => setGenType(e.target.value as GenerateType)}
                   disabled={!canUse || busy}
-                  className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-indigo-400 disabled:opacity-50"
+                  className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-[#2979FF] disabled:opacity-50"
                 >
                   {GENERATE_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -301,7 +301,7 @@ export default function FileGenerationPanel({
                   value={outFormat}
                   onChange={(e) => setOutFormat(e.target.value as OutputFormat)}
                   disabled={!canUse || busy}
-                  className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-indigo-400 disabled:opacity-50"
+                  className="w-full appearance-none text-sm rounded-lg border border-gray-200 bg-white px-3 py-2 pr-8 outline-none focus:border-[#2979FF] disabled:opacity-50"
                 >
                   {OUTPUT_FORMATS.map((f) => (
                     <option key={f.value} value={f.value}>
@@ -321,7 +321,7 @@ export default function FileGenerationPanel({
             type="button"
             onClick={() => void handleGenerate()}
             disabled={!canUse || busy}
-            className="mt-3 w-full px-3 py-2 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 disabled:opacity-50 flex items-center justify-center gap-2"
+            className="mt-3 w-full px-3 py-2 rounded-lg bg-[#2979FF] text-white text-sm font-semibold hover:bg-[#1565C0] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {generating ? (
               <>
@@ -350,7 +350,7 @@ export default function FileGenerationPanel({
                 Download the raw chat in common formats.
               </div>
             </div>
-            <Download size={18} className="text-indigo-500" />
+            <Download size={18} className="text-[#2979FF]" />
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">

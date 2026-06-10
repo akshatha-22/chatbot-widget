@@ -10,9 +10,9 @@ Educational overview of AI techniques used in Remi, with **explicit mapping** to
 
 ### How this project implements RAG
 
-1. **Ingest:** Upload file → extract text → chunk → embed → store in **per-file FAISS index** on disk.  
-2. **Retrieve:** On each user message, embed the query and search up to **5** nearest chunks (L2).  
-3. **Generate:** Prepend chunks to the Gemini prompt under `DOCUMENT CONTEXT`.
+1. **Ingest:** Upload file → MIME validate → extract text → chunk → embed (or text-only fallback) → store in **DB blobs** + disk + in-memory cache.  
+2. **Retrieve:** Embed query + FAISS L2 search, or **keyword fallback** when ML libs absent; up to **5** chunks.  
+3. **Generate:** Prepend chunks to the Gemini prompt under `DOCUMENT CONTEXT`. Identical questions from the **same user** with the same RAG digest may hit the **per-user TTL response cache** (skip Gemini; `cache_hit: true` on response).
 
 ```717:749:backend/app/services/chat_service.py
 def build_rag_context(db: Session, conversation_id: int, user_message: str) -> str:
@@ -24,7 +24,7 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
 
 ### What we do **not** do
 
-- Store embeddings in PostgreSQL (no pgvector table)  
+- pgvector / SQL-native vector search (blobs are opaque bytes, not pgvector columns)  
 - Rerank with Cohere or cross-encoders  
 - Show citations or chunk IDs to the user  
 - HyDE or multi-query retrieval  
@@ -37,8 +37,9 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
 |-------|-----------|
 | Model | `all-MiniLM-L6-v2` via `sentence-transformers` |
 | Dimension | 384 (MiniLM) |
-| Storage | `backend/data/vector_store/{file_id}.index` + `{file_id}.chunks` |
-| Query encoding | Same model at search time |
+| Storage | `uploaded_files.faiss_index_blob` + `chunks_blob` (primary); disk + memory cache |
+| Versioning | `embedding_model_version` column; auto-reindex when model changes |
+| Query encoding | Same model at search time (or keyword fallback) |
 
 ```13:20:backend/app/services/vector_store_service.py
 def get_embedding_model():
@@ -90,10 +91,11 @@ def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> Lis
 
 | Aspect | Implementation |
 |--------|----------------|
-| Index | `faiss.IndexFlatL2` per file |
-| Metric | L2 (Euclidean) distance — lower is better |
+| Index | `faiss.IndexFlatL2` per file (or keyword overlap fallback) |
+| Metric | L2 distance when FAISS available; keyword score otherwise |
 | Merge | Results from multiple files merged and sorted globally |
 | Dedup | Identical chunk text skipped |
+| In-memory cache | Each file index loaded once per worker (`_index_memory_cache`) |
 
 ```99:151:backend/app/services/vector_store_service.py
 def search(file_ids: List[str], query: str, top_k: int = 5) -> List[str]:
@@ -174,8 +176,10 @@ Corrupted PDFs raise `ValueError` → file `failed`, not silent empty RAG.
 | Bottleneck | Cause |
 |------------|--------|
 | Embedding thread | CPU-bound `SentenceTransformer` per upload |
-| FAISS load | Per-file index read from disk each search |
-| Gemini quota | 429 surfaced in fallback message text |
+| FAISS load | Mitigated by in-memory cache; DB blobs on redeploy |
+| Gemini quota | 100 calls/user/day UTC; 429 + `reset_at` + UI countdown |
+| Repeated questions | Per-user TTL response cache (`user_id` + question + RAG digest) skips duplicate Gemini calls |
+| Stale FAISS indexes | `embedding_model_version` column; auto-reindex on model mismatch |
 | SQLite | Not ideal for concurrent writers |
 
 For production, use PostgreSQL, horizontal API replicas, and consider a shared vector service if document volume grows.
@@ -200,4 +204,6 @@ When deploying Remi:
 | Chunk + index | `vector_store_service.py` |
 | Parse upload | `file_parser_service.py` |
 | Stream + fallback | `chat_service.py` → `iter_assistant_chunks` |
+| Response cache | `response_cache.py` |
+| Gemini quota | `quota_service.py` |
 | Client stream | `client/src/api/chat.ts` |

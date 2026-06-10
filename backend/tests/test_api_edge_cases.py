@@ -132,7 +132,7 @@ def test_auto_title_from_first_message(client, auth_headers):
         json={"title": "New Conversation"},
     ).json()["id"]
 
-    long_text = "A" * 50
+    long_text = "Quarterly revenue summary for product launch planning"
     client.post(
         f"/api/v1/chat/conversations/{conv_id}/messages",
         headers=auth_headers,
@@ -227,9 +227,8 @@ def test_post_message_empty_content(client, auth_headers, conversation_id):
         headers=auth_headers,
         json={"content": ""},
     )
-    # Empty string is allowed by schema today — still returns user + assistant pair
-    assert response.status_code == 200
-    assert response.json()[0]["content"] == ""
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
 
 
 def test_post_message_nonexistent_conversation(client, auth_headers):
@@ -416,14 +415,17 @@ def test_upload_docx_parsed(client, auth_headers, conversation_id, upload_dir):
             files={
                 "file": (
                     "report.docx",
-                    io.BytesIO(b"fake-docx-bytes"),
+                    io.BytesIO(b"PK\x03\x04fake-docx-zip-header-bytes"),
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
             },
         )
     assert response.status_code == 201
     assert response.json()["status"] == "processed"
-    mock_index.assert_called_once_with(response.json()["id"], "Parsed docx body")
+    mock_index.assert_called_once()
+    assert mock_index.call_args.args[0] == response.json()["id"]
+    assert mock_index.call_args.args[1] == "Parsed docx body"
+    assert mock_index.call_args.kwargs.get("db") is not None
 
 
 def test_chat_with_rag_uses_uploaded_context(

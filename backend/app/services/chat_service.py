@@ -3,7 +3,8 @@ from fastapi import HTTPException, status
 from typing import Iterator, List, Optional, Tuple
 from app.database.db import Conversation, Message, UploadedFile
 from app.config import settings
-from app.services import vector_store_service
+from app.core.sanitizer import sanitize_message
+from app.services import quota_service, response_cache, vector_store_service
 from datetime import datetime
 import json
 import re
@@ -26,6 +27,31 @@ def _gemini_models_to_try() -> List[str]:
 
 def _gemini_configured() -> bool:
     return settings.gemini_configured()
+
+
+def prepare_user_message(content: str) -> str:
+    """Sanitize an incoming user message before RAG/LLM use."""
+    return sanitize_message(content)
+
+
+def ensure_gemini_quota(
+    db: Session, conversation_id: int, user_id: int, user_message: str
+) -> None:
+    """Consume daily Gemini quota unless the response is already cached."""
+    user_message = prepare_user_message(user_message)
+
+    if not _gemini_configured():
+        return
+
+    if detect_pdf_request(user_message) is not None:
+        return
+
+    rag_context = build_rag_context(db, conversation_id, user_message)
+    use_search = not bool(rag_context.strip())
+    if response_cache.get_cached_response(user_id, user_message, rag_context, use_search):
+        return
+
+    quota_service.check_and_consume_gemini_quota(db, user_id)
 
 
 def _gemini_grounding_config():
@@ -401,7 +427,7 @@ def _create_pdf_assistant_message(
     conv = get_conversation(db, conversation_id, user_id)
     conversation_text = _conversation_text_for_pdf(conv)
     prompt = _build_pdf_topic_prompt(pdf_topic, conversation_text)
-    generated_content = generate_text(prompt)
+    generated_content = generate_text(prompt, db=db, user_id=user_id)
 
     if not generated_content:
         title = pdf_topic if pdf_topic != "content" else "Document"
@@ -562,17 +588,28 @@ def iter_assistant_chunks(
     db: Session, conversation_id: int, user_id: int, user_message: str
 ) -> Iterator[str]:
     """Yield assistant reply text chunks (Gemini stream, or one-shot fallback/OpenAI)."""
+    user_message = prepare_user_message(user_message)
     _conv, gemini_prompt, rag_context, history, _ = _prepare_assistant_context(
         db, conversation_id, user_id, user_message
     )
 
+    use_search = not bool(rag_context.strip())
+    cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
+    if cached:
+        yield cached
+        return
+
     if _gemini_configured():
         streamed = False
-        use_search = not bool(rag_context.strip())
+        parts: List[str] = []
         for piece in _stream_gemini(gemini_prompt, use_search=use_search):
             streamed = True
+            parts.append(piece)
             yield piece
         if streamed:
+            response_cache.set_cached_response(
+                user_id, user_message, rag_context, use_search, "".join(parts)
+            )
             return
 
     content = _openai_assistant_content(history, user_message, rag_context)
@@ -587,6 +624,7 @@ def stream_and_save_assistant(
     db: Session, conversation_id: int, user_id: int, user_message: str
 ) -> Iterator[str]:
     """Yield SSE-formatted chunks, then a final done event after persisting the assistant message."""
+    user_message = prepare_user_message(user_message)
     pdf_topic = detect_pdf_request(user_message)
     if pdf_topic is not None:
         assistant_msg = _create_pdf_assistant_message(
@@ -635,16 +673,34 @@ def list_messages(db: Session, conversation_id: int, user_id: int) -> List[Messa
     )
 
 
+def require_conversation_access(
+    db: Session, conversation_id: int, user_id: int
+) -> Conversation:
+    """Return a conversation or raise 404/403 without leaking cross-user ownership."""
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    if conv.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this conversation",
+        )
+    return conv
+
+
 def get_conversation(db: Session, conversation_id: int, user_id: int) -> Conversation:
     """Retrieve a specific conversation, verifying it belongs to the user."""
     conv = db.query(Conversation).filter(
         Conversation.id == conversation_id,
-        Conversation.user_id == user_id
+        Conversation.user_id == user_id,
     ).first()
     if not conv:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
+            detail="Conversation not found",
         )
     return conv
 
@@ -687,9 +743,13 @@ def create_message(
     has_pdf: bool = False,
     pdf_content: Optional[str] = None,
     pdf_filename: Optional[str] = None,
+    cache_hit: bool = False,
 ) -> Message:
     """Create a new message in a conversation after verifying user ownership."""
     get_conversation(db, conversation_id, user_id)
+
+    if role == "user":
+        content = prepare_user_message(content)
 
     db_msg = Message(
         conversation_id=conversation_id,
@@ -702,6 +762,8 @@ def create_message(
     db.add(db_msg)
     db.commit()
     db.refresh(db_msg)
+    if cache_hit:
+        setattr(db_msg, "cache_hit", True)
     return db_msg
 
 
@@ -735,7 +797,7 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
         file_ids = [f.id for f in files]
         print(f"[RAG] Searching {len(file_ids)} files")
 
-        chunks = vector_store_service.search(file_ids, user_message, top_k=5)
+        chunks = vector_store_service.search(file_ids, user_message, top_k=5, db=db)
         if not chunks:
             print("[RAG] No chunks returned from FAISS")
             return ""
@@ -751,6 +813,7 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
 
 def generate_assistant_response(db: Session, conversation_id: int, user_id: int, user_message: str) -> Message:
     """Generate assistant response using Gemini, OpenAI, or a smart local fallback."""
+    user_message = prepare_user_message(user_message)
     pdf_topic = detect_pdf_request(user_message)
     if pdf_topic is not None:
         return _create_pdf_assistant_message(db, conversation_id, user_id, pdf_topic)
@@ -762,8 +825,14 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     assistant_content = ""
     gemini_error: Optional[str] = None
 
+    use_search = not bool(rag_context.strip())
+    cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
+    if cached:
+        return create_message(
+            db, conversation_id, user_id, "assistant", cached, cache_hit=True
+        )
+
     if _gemini_configured():
-        use_search = not bool(rag_context.strip())
         assistant_content, gemini_error = _call_gemini(gemini_prompt, use_search=use_search)
         if assistant_content is None:
             assistant_content = ""
@@ -776,13 +845,25 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
             user_message, rag_context, gemini_error
         )
 
+    if assistant_content and _gemini_configured():
+        response_cache.set_cached_response(
+            user_id, user_message, rag_context, use_search, assistant_content
+        )
+
     return create_message(db, conversation_id, user_id, "assistant", assistant_content)
 
 
-def generate_text(prompt: str) -> str:
+def generate_text(
+    prompt: str,
+    *,
+    db: Optional[Session] = None,
+    user_id: Optional[int] = None,
+) -> str:
     """Generate text from a one-shot prompt via Gemini, with OpenAI fallback."""
     content = ""
     if _gemini_configured():
+        if db is not None and user_id is not None:
+            quota_service.check_and_consume_gemini_quota(db, user_id)
         content, _ = _call_gemini(prompt)
         content = (content or "").strip()
 
@@ -882,7 +963,7 @@ def generate_conversation_file(
         conversation_text = "(No messages in this conversation yet.)"
 
     prompt = _build_document_prompt(kind_norm, conversation_text)
-    content = generate_text(prompt)
+    content = generate_text(prompt, db=db, user_id=user_id)
 
     type_labels = {"summary": "Summary", "report": "Report", "analysis": "Analysis"}
     doc_type = type_labels[kind_norm]

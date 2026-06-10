@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react'
 import { streamMessage } from '../../api/chat'
+import { RateLimitError } from '../../api/rateLimit'
 import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import type { Conversation, Message } from '../../types'
 
@@ -12,6 +13,7 @@ export type StreamSendParams = {
   onMessagesChange: React.Dispatch<React.SetStateAction<Message[]>>
   onRefreshConversations: () => Promise<unknown>
   setIsTyping: (value: boolean) => void
+  onRateLimit?: (retryAfterSeconds: number) => void
 }
 
 /** Stream a user message once (guards against double-submit / StrictMode races). */
@@ -24,6 +26,7 @@ export async function streamSendMessage({
   onMessagesChange,
   onRefreshConversations,
   setIsTyping,
+  onRateLimit,
 }: StreamSendParams): Promise<void> {
   if (!content || isTyping || isSendingRef.current) return
   isSendingRef.current = true
@@ -93,6 +96,9 @@ export async function streamSendMessage({
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return
+    }
+    if (err instanceof RateLimitError) {
+      onRateLimit?.(err.retryAfterSeconds)
     }
     if (!controller.signal.aborted) {
       onMessagesChange((prev) => prev.filter((m) => m.id !== assistantId))

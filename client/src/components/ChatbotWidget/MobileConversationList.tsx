@@ -118,7 +118,7 @@ export default function MobileConversationList({
           <button
             type="button"
             onClick={onNewConversation}
-            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[#F59E0B] py-3 text-sm font-medium text-white active:scale-[0.98] md:hover:bg-[#D97706]"
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-[#2979FF] py-3 text-sm font-medium text-white active:scale-[0.98] md:hover:bg-[#1565C0]"
           >
             <Plus size={16} />
             New Conversation
@@ -137,7 +137,7 @@ export default function MobileConversationList({
             }}
             className={`shrink-0 rounded-full px-3 py-2 text-xs font-medium active:opacity-80 ${
               category === cat
-                ? 'bg-[#F59E0B] text-white'
+                ? 'bg-[#2979FF] text-white'
                 : 'bg-[#F0F0F0] text-[#4A4A4A]'
             }`}
           >
@@ -165,14 +165,14 @@ export default function MobileConversationList({
           const statusCls = isTrashed
             ? 'bg-red-50 text-red-600'
             : isArchived
-              ? 'bg-amber-50 text-amber-700'
+              ? 'bg-blue-50 text-blue-700'
               : 'bg-green-50 text-green-600'
 
           return (
             <div
               key={c.id}
               className={`relative overflow-hidden rounded-xl border border-[#F0F0F0] bg-white shadow-sm ${
-                isActive ? 'ring-2 ring-[#F59E0B]/50' : ''
+                isActive ? 'ring-2 ring-[#2979FF]/50' : ''
               } ${menuOpen ? 'z-20' : 'z-0'}`}
             >
               <div
@@ -205,7 +205,7 @@ export default function MobileConversationList({
                   >
                     <Star
                       size={16}
-                      className={starred ? 'text-[#F59E0B]' : 'text-[#ACACAC]'}
+                      className={starred ? 'text-[#2979FF]' : 'text-[#ACACAC]'}
                       fill={starred ? 'currentColor' : 'none'}
                     />
                   </button>
@@ -348,7 +348,7 @@ export default function MobileConversationList({
           <button
             type="button"
             onClick={onViewAllDashboard}
-            className="min-h-[44px] w-full rounded-lg py-2.5 text-sm font-medium text-[#D97706] active:bg-[#FFFBF0] md:hover:bg-[#FFFBF0]"
+            className="min-h-[44px] w-full rounded-lg py-2.5 text-sm font-medium text-[#1565C0] active:bg-[#E3F2FD] md:hover:bg-[#E3F2FD]"
           >
             View All Conversations
           </button>

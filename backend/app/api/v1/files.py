@@ -1,15 +1,21 @@
+import logging
 import os
 import shutil
 import threading
 import traceback
 from uuid import uuid4
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, status
 from sqlalchemy.orm import Session
 from typing import List
 
+from app.core.mime_validation import _MAGIC_SAMPLE_SIZE, validate_upload_mime
+from app.core.network import get_real_ip
 from app.database.db import SessionLocal, get_db, User, UploadedFile
+from app.schemas.audit_log import AuditAction
 from app.schemas.file import FileResponse
-from app.services import auth_service, file_parser_service, vector_store_service
+from app.services import audit_service, auth_service, file_parser_service, vector_store_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat/conversations", tags=["Files"])
 
@@ -31,7 +37,7 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
 
         print(f"[EMBED] Extracted {len(extracted_text)} characters")
         print(f"[EMBED] Creating FAISS index for {file_id}")
-        vector_store_service.chunk_and_store(file_id, extracted_text)
+        vector_store_service.chunk_and_store(file_id, extracted_text, db=db)
         print(f"[EMBED] FAISS index created successfully")
 
         db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
@@ -72,6 +78,7 @@ def _run_embedding_background(file_id: str, file_path: str, filename: str) -> No
 @router.post("/{conversation_id}/files", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(
     conversation_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: User = Depends(auth_service.get_current_user),
@@ -81,6 +88,11 @@ async def upload_file(
     from app.services.chat_service import get_conversation
 
     get_conversation(db, conversation_id, current_user.id)
+
+    file_header = file.file.read(_MAGIC_SAMPLE_SIZE)
+    file.file.seek(0)
+
+    validate_upload_mime(file.content_type, file.filename or "", file_header=file_header)
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -131,6 +143,16 @@ async def upload_file(
             filename,
         )
 
+    background_tasks.add_task(
+        audit_service.log_action,
+        db,
+        current_user.id,
+        AuditAction.upload,
+        "file",
+        file_id,
+        get_real_ip(request),
+    )
+
     return db_file
 
 
@@ -150,3 +172,59 @@ def list_uploaded_files(
         .filter(UploadedFile.conversation_id == conversation_id)
         .all()
     )
+
+
+@router.delete(
+    "/{conversation_id}/files/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_uploaded_file(
+    conversation_id: int,
+    file_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete an uploaded file, its vectors, and on-disk copy."""
+    from app.services.chat_service import require_conversation_access
+
+    require_conversation_access(db, conversation_id, current_user.id)
+
+    db_file = (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.id == file_id,
+            UploadedFile.conversation_id == conversation_id,
+        )
+        .first()
+    )
+    if not db_file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+
+    stored_path = db_file.file_path
+    db.delete(db_file)
+    db.commit()
+
+    # Best-effort cleanup after DB row is gone (idempotent for retries).
+    vector_store_service.delete_file_data(file_id)
+    if stored_path and os.path.isfile(stored_path):
+        try:
+            os.remove(stored_path)
+        except OSError as exc:
+            logger.warning("Could not delete upload file %s: %s", stored_path, exc)
+
+    background_tasks.add_task(
+        audit_service.log_action,
+        db,
+        current_user.id,
+        AuditAction.delete,
+        "file",
+        file_id,
+        get_real_ip(request),
+    )
+
+    return None

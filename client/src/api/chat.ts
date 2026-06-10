@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { readRateLimitFromResponse } from './rateLimit'
 
 export interface Conversation {
   id: string
@@ -132,6 +133,11 @@ export async function streamMessage(
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      const rateLimitError = await readRateLimitFromResponse(response)
+      handlers.onError?.(rateLimitError)
+      throw rateLimitError
+    }
     const error = new Error(`Stream failed (${response.status})`)
     handlers.onError?.(error)
     throw error

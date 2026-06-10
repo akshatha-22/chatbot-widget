@@ -30,18 +30,24 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 
 | Feature | Implementation |
 |---------|----------------|
-| Upload formats | PDF, DOCX, XLSX/XLS, TXT, MD, CSV, etc. (`file_parser_service.py`) |
-| Max size | **100 MB** (`files.py`, `main.py` middleware) |
-| Drag-and-drop UI | `FileUploadModal.tsx` |
+| Upload formats | PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG (`uploadFormats.ts` + `mime_validation.py`) |
+| Max size | **100 MB** per file (`files.py`); **52 MB** request body cap on upload route (`main.py`) |
+| Magic-byte MIME | First 512 bytes validated (`python-magic` + fallback) — 415 on mismatch |
+| File delete | `DELETE .../files/{id}` — DB-first, then FAISS cache + disk; frontend `FileListItem` with optimistic UI |
+| File picker | Shows **all files** — no `accept` filter; client validates after selection |
+| Drag-and-drop UI | `FileUploadModal.tsx` with validation error banner |
+| Chat file badge | Count in header; tap to upload (0 files) or view Files panel |
 | Processing states | `pending` → `processed` / `failed` |
 | Background embedding | Daemon thread after upload (`process_file_embedding`) |
-| Chunking | ~**500 characters** per chunk (`split_text`; overlap param exists but is not applied in loop logic) |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| Vector store | FAISS `IndexFlatL2` per file on disk |
-| Retrieval | Top **5** chunks, L2 distance (`vector_store_service.search`) |
-| RAG in chat | Injected as `DOCUMENT CONTEXT` in Gemini prompt; disables Google Search when RAG present |
+| Chunking | ~**500 characters** per chunk (`split_text`) |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` when installed |
+| Vector store | FAISS `IndexFlatL2` + **DB blobs** (`faiss_index_blob`, `chunks_blob`) + disk + in-memory cache |
+| Dev fallback | Keyword search when FAISS/sentence-transformers not installed |
+| Retrieval | Top **5** chunks; L2 or keyword (`vector_store_service.search`) |
+| RAG in chat | Injected as `DOCUMENT CONTEXT`; disables Google Search when RAG present |
+| Status polling | **1.5s** interval while `pending` (`index.tsx`) |
 
-**Not shipped:** citation links to page numbers, confidence scores, server-side file type allowlist (unsupported extensions may fail at parse), S3 storage, re-index queue after server restart.
+**Not shipped:** citation links to page numbers, confidence scores, S3 storage, distributed embed queue.
 
 ---
 
@@ -80,12 +86,13 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 |---------|----------------|
 | Sign up | `POST /api/v1/auth/signup` |
 | Sign in | `POST /api/v1/auth/login` → JWT |
+| Auth rate limiting | 5 failed attempts/min per IP on login and signup (separate scopes; in-memory) |
 | Session check | `GET /api/v1/auth/me` on widget open |
 | Token storage | `localStorage` key `token` |
 | Sign out | Clears token + widget state |
 | Password hashing | bcrypt (`core/security.py`) |
 
-**Not shipped:** OAuth, email verification, password reset, refresh tokens, RBAC, admin roles.
+**Not shipped:** OAuth, email verification, password reset, refresh tokens, RBAC, cross-tenant admin roles.
 
 ---
 
@@ -94,7 +101,8 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Feature | Implementation |
 |---------|----------------|
 | Breakpoint hook | `useIsMobile.ts` (< 768px) |
-| Bottom tab bar | Chat / Chats / Files |
+| Bottom tab bar | Chat / Chats / Files (tooltips + file-count badge on Files tab) |
+| Nav tooltips | `NavTooltip.tsx` on header and toolbar buttons |
 | Bottom sheets | Modals on mobile (`MessageEditModal`, `FileUploadModal`, `SearchFilterPanel`) |
 | Full-screen expanded | `inset-0` on small viewports |
 | Safe area | `pb-safe` on tab bar |
@@ -119,12 +127,14 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Topic | Behavior |
 |-------|----------|
 | Streaming | One HTTP connection per message; chunks buffered client-side |
-| File poll | 3s interval, 5 min max (`index.tsx`) |
+| File poll | 1.5s interval, 5 min max (`index.tsx`) |
 | Embedding | CPU-bound in background thread; no distributed queue |
+| Response cache | Per-user TTLCache — `(user_id, question, rag_digest, use_search)`; `cache_hit` on assistant messages |
+| FAISS versioning | `embedding_model_version` on uploads; auto-reindex on mismatch; `GET /admin/faiss-health` (user-scoped) |
 | DB default | SQLite — fine for dev; Postgres recommended for production |
 | Stream on widget close | **Does not abort** — known gap (see ARCHITECTURE.md) |
 
-**Not shipped:** Redis cache, CDN for uploads, response caching, offline mode, analytics dashboards.
+**Not shipped:** Redis, CDN for uploads, offline mode, analytics dashboards.
 
 ---
 
@@ -132,11 +142,20 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 
 | Shipped | Not shipped |
 |---------|-------------|
-| JWT on protected routes | Rate limiting |
-| Per-user conversation isolation | Content moderation |
-| bcrypt passwords | E2E encryption |
-| 100MB upload cap | GDPR tooling |
-| CORS allowlist + regex | Audit logs |
+| JWT on protected routes (required `SECRET_KEY`, min 32 chars) | Redis-backed distributed rate limits |
+| Six security headers + HSTS when `ENVIRONMENT=production` | Content moderation / LLM guardrails service |
+| Prompt-injection sanitization (`core/sanitizer.py`) | E2E encryption |
+| MIME validation: extension + Content-Type + magic bytes (415) | GDPR data-export automation |
+| Per-route body size limits (1 MB chat, 52 MB uploads) | Sentry (env placeholder only) |
+| Auth rate limiting on `/login` and `/signup` (429 per IP) | Admin RBAC |
+| Audit logging (`audit_logs` table, background, best-effort) | |
+| Per-user Gemini daily quota (UTC midnight; 429 + `reset_at`) | |
+| Per-user response cache keys (no cross-user cache bleed) | |
+| Per-user conversation/file isolation; delete returns 403 for non-owner | |
+| bcrypt passwords | |
+| Cloudflare IP range validation (`CLOUDFLARE_ONLY`) + 24h refresh | |
+| Proxy-aware `get_real_ip()` for audit + rate limits | |
+| CORS allowlist + Vercel preview regex | |
 
 ---
 
@@ -163,6 +182,7 @@ Use this when demoing or writing tests:
 - [ ] Sign up and sign in inside widget  
 - [ ] Stream a chat reply  
 - [ ] Upload PDF and ask a question about it (wait for `processed`)  
+- [ ] Delete an uploaded file from Files panel (confirm → toast)  
 - [ ] Expand widget; use mobile tabs under narrow viewport  
 - [ ] Star a conversation; filter Starred  
 - [ ] Archive via ⋮ menu; see Archived tab  
