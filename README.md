@@ -2,9 +2,15 @@
 
 A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI assistant. Users sign in inside the widget, chat with streaming responses, upload documents for RAG-backed answers, export conversations, and generate PDFs—either from the Generate panel or directly in chat with natural language.
 
+<<<<<<< HEAD
 **Repository:** [github.com/Akshatha-22/chatbot-widget](https://github.com/Akshatha-22/chatbot-widget)  
 **Live demo:** [chatbot-widget-client.vercel.app](https://chatbot-widget-client.vercel.app)  
 **API (Railway):** [chatbot-widgetclient-production.up.railway.app](https://chatbot-widgetclient-production.up.railway.app)
+=======
+- **Live demo:** https://chatbot-widget-client-g0f5xma65-akshatha-22s-projects.vercel.app/
+- **Repo:** https://github.com/Akshatha-22/chatbot-widget
+- **API:** https://chatbot-widgetclient-production.up.railway.app
+>>>>>>> 3e2113d077cbaea9aba9c741d35929416c4fc5c7
 
 This README reflects **what is in the repository today**, derived from the running code—not aspirational docs or empty scaffold folders.
 
