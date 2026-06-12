@@ -232,6 +232,14 @@ flowchart LR
 
 Optional scaffold under `docker/kubernetes/` is **not** the primary documented path.
 
+**Live URLs (production):**
+
+| Tier | URL |
+|------|-----|
+| Frontend (Vercel) | https://chatbot-widget-client.vercel.app |
+| Backend API (Railway) | https://chatbot-widgetclient-production.up.railway.app |
+| Repository | https://github.com/Akshatha-22/chatbot-widget |
+
 ---
 
 ## 10. Mobile expanded layout

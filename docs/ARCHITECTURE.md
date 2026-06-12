@@ -2,7 +2,7 @@
 
 Technical deep-dive for the **chatbot-widget** monorepo (`client/` + `backend/`). This document is grounded in the running code with file paths and line references. For diagrams and product overview, see also [01_system_overview.md](./01_system_overview.md) and [02_architecture_diagrams.md](./02_architecture_diagrams.md).
 
-**Last aligned with codebase:** June 2026 (security sprint: sanitization, audit logs, auth rate limit, MIME magic bytes, body limits, per-user cache, FAISS versioning, file delete UI, Cloudflare IP trust).
+**Last aligned with codebase:** June 2026 (security sprint + deployment hardening: sanitization, audit logs, auth rate limit, MIME magic bytes, body limits, per-user cache, FAISS versioning, file delete UI, Cloudflare IP trust, Vercel + Railway production).
 
 ---
 
@@ -325,7 +325,7 @@ Also set `ENVIRONMENT=production` on Railway to enable `Strict-Transport-Securit
 
 ### Prompt sanitization
 
-`core/sanitizer.py` strips common injection patterns from user messages before RAG/LLM. If the message is only injection content after sanitization, `chat_service` returns **400**. Sanitization events are logged at info level.
+`core/sanitizer.py` strips common injection patterns from user messages before RAG/LLM. If the message is only injection content after sanitization, `chat_service` returns **400**. Sanitization logs **message length only** (`len %d -> %d`), never message content.
 
 ### Request body size limits
 
@@ -351,7 +351,7 @@ Rejects mismatches with **415**. Supports PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSO
 
 ### Audit logging
 
-`audit_service.py` writes to `audit_logs` table (best-effort, background). Hooks in `auth.py`, `chat.py`, `files.py` for login, signup, message send/stream, generate, upload, file delete. Failures do not block the request.
+`audit_service.py` writes to `audit_logs` table (best-effort, background). Hooks in `auth.py`, `chat.py`, `files.py` for **login**, message send/stream, generate, upload, file delete, and conversation delete. Signup is rate-limited but not audit-logged. Failures do not block the request.
 
 ### Gemini daily quota (cost protection)
 
@@ -627,6 +627,8 @@ App starts; chat uses OpenAI if configured, else `_fallback_assistant_content` â
 | Archived/Trash client-only | Info | Not synced across devices |
 | In-memory rate limit + cache per replica | Medium | Use Redis when scaling Railway horizontally |
 | Sentry / admin RBAC | Low | `SENTRY_DSN` unused; `faiss-health` is user-scoped only |
+| Conversation Detail tabs | Medium | `getConversationDetail()` unused; no tabbed detail view |
+| Embeddable `build:lib` package | Medium | No Vite library mode / script-tag bundle yet |
 
 ---
 

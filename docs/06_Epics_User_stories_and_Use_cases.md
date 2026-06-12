@@ -29,6 +29,8 @@ User stories describe specific features from the user's perspective, following t
 *   **User Story 2.2**: As a user, I want to see the history of my conversation with the chatbot, so that I can refer back to previous questions and answers.
 *   **User Story 2.3**: As a user, I want the chatbot's responses to be clearly distinguishable from my own messages.
 *   **User Story 2.4**: As a user, I want my login credentials protected from brute-force attacks, so that my account remains secure. *(Shipped: auth rate limiting — 5 failed attempts/min per IP on login and signup.)*
+*   **User Story 2.5**: As a user, I want a visually distinct launcher that fits any host site, so the widget feels modern and embeddable. *(Shipped: dark sphere + soft blue radial halo in `RemiFace.tsx`.)*
+*   **User Story 2.6**: As a user, I want to search and filter my conversations, so I can find past chats quickly. *(Shipped: `SearchFilterPanel.tsx` — text, date, file, and status filters.)*
 
 ### Epic 3: Contextual Understanding and Retrieval
 

@@ -11,12 +11,14 @@ How to run and deploy **Remi** using the **actual** stack in this repository.
 
 ## 1. Overview
 
-| Layer | Typical production | Local dev |
+| Layer | Production (live) | Local dev |
 |-------|-------------------|-----------|
-| Frontend | **Vercel** (static `client/dist`) | Vite `npm run dev` :5173 |
-| Backend | **Railway** (`backend/Dockerfile`, `railway.toml`) | Uvicorn :8000 |
-| Database | Managed **PostgreSQL** | **SQLite** (`sqlite:///./chatbot.db`) |
+| Frontend | **Vercel** — https://chatbot-widget-client.vercel.app | Vite `npm run dev` :5173 |
+| Backend | **Railway** — https://chatbot-widgetclient-production.up.railway.app | Uvicorn :8000 |
+| Database | Managed **PostgreSQL** on Railway | **SQLite** (`sqlite:///./chatbot.db`) |
 | Vector / uploads | **PostgreSQL blobs** + optional disk cache | `backend/data/` |
+
+**Deployment hardening:** complete — `VITE_API_URL` on Vercel, `ENVIRONMENT=production` on Railway, `CORS_ORIGINS` aligned with Vercel domain.
 
 **Not required:** Redis, RabbitMQ, Kubernetes, Docker Compose (root `docker-compose.yml` is empty).
 
@@ -244,14 +246,14 @@ Use Railway logs for `[RAG]`, `[EMBED]`, `[FAISS]`, sanitization info lines.
 
 ---
 
-## 13. Pre-production checklist
+## 13. Production checklist (completed)
 
-- [ ] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
-- [ ] Railway: `CORS_ORIGINS` = Vercel production URL
-- [ ] Vercel: `VITE_API_URL` = Railway HTTPS URL; redeploy completed
-- [ ] `curl.exe -sS https://API/health` → `{"status":"healthy"}`
-- [ ] Security headers visible on `/health`
-- [ ] Smoke: signup → chat → upload → delete file
+- [x] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
+- [x] Railway: `CORS_ORIGINS` = Vercel production URL
+- [x] Vercel: `VITE_API_URL` = `https://chatbot-widgetclient-production.up.railway.app`; redeploy completed
+- [x] `curl.exe -sS https://chatbot-widgetclient-production.up.railway.app/health` → `{"status":"healthy"}`
+- [x] Security headers + HSTS visible on `/health`
+- [x] Smoke: signup → chat → upload → delete file on https://chatbot-widget-client.vercel.app
 
 ---
 

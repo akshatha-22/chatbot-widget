@@ -181,7 +181,9 @@ backend/
 | `04_ml_ai_concepts.md` | RAG/LLM concepts |
 | `05_project_structure(...).md` | This file |
 | `06_Epics_User_stories_and_Use_cases.md` | Epics, user stories, use cases |
-| `07_deployment_guide.md` | Local + production deploy |
+| `07_deployment_guide.md` | Local + production deploy (live URLs) |
+
+**Not yet in codebase:** `build:lib` embeddable package; Conversation Detail tabbed view.
 
 ---
 

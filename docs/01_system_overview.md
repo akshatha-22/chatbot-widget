@@ -16,7 +16,9 @@ Remi is a **self-contained React widget** plus a **FastAPI API** that provides:
 - **Response caching** — per-user in-process TTL cache for repeated questions (no Redis); `cache_hit` on assistant messages
 - **File delete** — API + `FileListItem` UI with inline confirm and optimistic removal
 - **PDF generation** from chat intent or the Generate panel
-- **Conversation history**, dashboard search/filter UI, and **mobile-responsive** expanded layout
+- **Conversation history**, dashboard **Search & Filter** UI (text, date, file, status filters), and **mobile-responsive** expanded layout
+- **Visual identity** — dark launcher sphere with soft blue radial halo (`RemiFace.tsx`); file delete UX on desktop and mobile with optimistic UI + toast
+- **Production deployment** — frontend on Vercel, API on Railway, `VITE_API_URL` + `CORS_ORIGINS` + `ENVIRONMENT=production` aligned
 
 There is **no** LangChain, Redis, Celery, WebSocket server, or moderation pipeline in the running application.
 
@@ -144,7 +146,7 @@ graph TB
 | Module | Role |
 |--------|------|
 | `main.py` | App factory, CORS, body limits, lifespan (Cloudflare refresh), migrations |
-| `api/v1/auth.py` | signup, login, me (+ audit + rate limit) |
+| `api/v1/auth.py` | signup, login, me (+ login audit + rate limit on both) |
 | `api/v1/chat.py` | conversations, messages, stream, generate |
 | `api/v1/files.py` | upload, list, delete |
 | `api/v1/admin.py` | `GET /admin/faiss-health` (user-scoped) |
@@ -207,15 +209,22 @@ Interactive docs: `http://localhost:8000/docs` when the API is running.
 
 ---
 
-## Deployment (production)
+## Deployment (production — live)
 
-| Layer | Typical target |
+| Layer | URL / target |
 |-------|----------------|
-| Frontend | **Vercel** (`VITE_API_URL` at build time) |
-| Backend | **Railway** (`backend/Dockerfile`, `backend/railway.toml`) |
-| Database | Managed PostgreSQL on host platform; SQLite for local dev only |
+| Frontend | https://chatbot-widget-client.vercel.app |
+| Backend API | https://chatbot-widgetclient-production.up.railway.app |
+| Database | PostgreSQL on Railway; SQLite (`chatbot.db`) for local dev only |
 
-See [07_deployment_guide.md](./07_deployment_guide.md).
+Hardening complete: `VITE_API_URL` on Vercel, `ENVIRONMENT=production` on Railway, `CORS_ORIGINS` aligned. See [07_deployment_guide.md](./07_deployment_guide.md).
+
+## Remaining work
+
+| Item | Status |
+|------|--------|
+| Conversation Detail tabs (Messages / Files / Generated Files / Details) | Not built |
+| Embeddable npm package (`build:lib` drop-in widget) | Not built |
 
 ---
 

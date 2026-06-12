@@ -207,3 +207,5 @@ When deploying Remi:
 | Response cache | `response_cache.py` |
 | Gemini quota | `quota_service.py` |
 | Client stream | `client/src/api/chat.ts` |
+
+**Not yet built:** Conversation Detail tabs; embeddable `build:lib` npm package.

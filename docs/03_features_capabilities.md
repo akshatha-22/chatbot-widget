@@ -10,7 +10,7 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 
 | Feature | Implementation |
 |---------|----------------|
-| Floating launcher | `RemiLauncher.tsx` + `RemiSphere.tsx` (Framer Motion) |
+| Floating launcher | `RemiLauncher.tsx` + `RemiSphere.tsx` — dark sphere, soft blue radial halo (`RemiFace.tsx`); replaced amber/yellow theme |
 | Compact chat panel | `CompactWidget.tsx` (~350px, bottom-right) |
 | Expanded workspace | `ExpandedWidget.tsx` (full screen on mobile) |
 | Streaming replies | SSE via `POST .../messages/stream` + `streamSend.ts` |
@@ -143,7 +143,7 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Shipped | Not shipped |
 |---------|-------------|
 | JWT on protected routes (required `SECRET_KEY`, min 32 chars) | Redis-backed distributed rate limits |
-| Six security headers + HSTS when `ENVIRONMENT=production` | Content moderation / LLM guardrails service |
+| Five security headers on every response; HSTS when `ENVIRONMENT=production` | Content moderation / LLM guardrails service |
 | Prompt-injection sanitization (`core/sanitizer.py`) | E2E encryption |
 | MIME validation: extension + Content-Type + magic bytes (415) | GDPR data-export automation |
 | Per-route body size limits (1 MB chat, 52 MB uploads) | Sentry (env placeholder only) |
@@ -156,10 +156,20 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Cloudflare IP range validation (`CLOUDFLARE_ONLY`) + 24h refresh | |
 | Proxy-aware `get_real_ip()` for audit + rate limits | |
 | CORS allowlist + Vercel preview regex | |
+| Production deployment hardening | `VITE_API_URL` on Vercel, `ENVIRONMENT=production` on Railway, CORS aligned — live |
 
 ---
 
-## 10. Scaffold / optional (not in runtime app)
+## 10. Remaining work (not shipped)
+
+| Item | Notes |
+|------|-------|
+| Conversation Detail tabs | Messages / Files / Generated Files / Details — `getConversationDetail()` in `chat.ts` unused |
+| Embeddable npm package | `build:lib` Vite library mode for script-tag / drop-in embedding |
+
+---
+
+## 11. Scaffold / optional (not in runtime app)
 
 These exist as **files or scripts** but are **not wired** into `backend/app/`:
 

@@ -2,6 +2,10 @@
 
 A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI assistant. Users sign in inside the widget, chat with streaming responses, upload documents for RAG-backed answers, export conversations, and generate PDFs—either from the Generate panel or directly in chat with natural language.
 
+**Repository:** [github.com/Akshatha-22/chatbot-widget](https://github.com/Akshatha-22/chatbot-widget)  
+**Live demo:** [chatbot-widget-client.vercel.app](https://chatbot-widget-client.vercel.app)  
+**API (Railway):** [chatbot-widgetclient-production.up.railway.app](https://chatbot-widgetclient-production.up.railway.app)
+
 This README reflects **what is in the repository today**, derived from the running code—not aspirational docs or empty scaffold folders.
 
 ---
@@ -90,7 +94,7 @@ There is **no** LangChain, Redis, Celery, WebSocket server, or Kubernetes runtim
 
 ```bash
 # 1. Clone and enter the repo
-git clone <your-repo-url> chatbot-widget
+git clone https://github.com/Akshatha-22/chatbot-widget.git
 cd chatbot-widget
 
 # 2. Environment — repo root (shared by backend + Vite)
@@ -203,7 +207,7 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 
 | Feature | Implementation |
 | --- | --- |
-| **RemiLauncher + RemiSphere** | Floating animated launcher (dark charcoal sphere, electric-blue accents) |
+| **RemiLauncher + RemiSphere** | Floating launcher — dark sphere with soft blue radial halo (`RemiFace.tsx`); replaced earlier amber/yellow theme |
 | **RemiAvatar2D / RemiFace** | Shared mascot in headers and message bubbles |
 | **NavTooltip** | Hover/tap hints on toolbar, tabs, and header buttons |
 | **RateLimitBanner** | Server-authoritative countdown when daily Gemini quota is exceeded (429 + `reset_at`) |
@@ -221,7 +225,7 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | **Conversation CRUD** | Create, list, rename, delete via `/chat/conversations` |
 | **Auto-title** | First user message sets title when still a placeholder |
 | **Message edit & resend** | `MessageEditModal` → `POST …/messages` |
-| **Conversation dashboard** | `WidgetConversationDashboard` + `SearchFilterPanel` |
+| **Conversation dashboard** | `WidgetConversationDashboard` + `SearchFilterPanel` (text, date, file, status filters — shipped) |
 | **Starred conversations** | `localStorage` via `starredStorage.ts` |
 | **Archived / Trash** | `localStorage` via `conversationFoldersStorage.ts` (client-only) |
 
@@ -257,12 +261,12 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | --- | --- |
 | **JWT sessions** | Token in `localStorage`; restored via `GET /auth/me` on mount |
 | **SECRET_KEY** | **Required** (min 32 chars) — app refuses to start without it (except `ENVIRONMENT=test`) |
-| **Security headers** | Six headers on every response via `SecurityHeadersMiddleware`; HSTS when `ENVIRONMENT=production` |
+| **Security headers** | Five headers on every response; HSTS added when `ENVIRONMENT=production` (`SecurityHeadersMiddleware`) |
 | **Prompt sanitization** | `core/sanitizer.py` strips injection patterns before RAG/LLM; 400 if message is only injection content |
 | **Request body limits** | 1 MB for `/api/v1/chat/*` (messages); 52 MB for file upload routes (`main.py` middleware) |
 | **MIME validation** | Extension + Content-Type + first 512 bytes magic-byte check (`python-magic` + fallback) |
 | **Auth rate limiting** | In-memory sliding window per IP: 5 failed attempts/min on `/login` and `/signup` (separate scopes) |
-| **Audit logging** | `audit_logs` table; best-effort background logging on upload, message, generate, login, delete |
+| **Audit logging** | `audit_logs` table; background logging on login, message, generate, upload, file/conversation delete (user ID + IP + timestamp) |
 | **Gemini daily quota** | 100 calls/user/day UTC calendar reset; 429 includes `retry_after_seconds` + `reset_at` |
 | **Response cache privacy** | Cache key scoped to `(user_id, normalized_question, rag_digest, use_search)` |
 | **Password hashing** | bcrypt |
@@ -522,13 +526,32 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 - FAISS indices and text chunks are **persisted in PostgreSQL** (`uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`) so Railway redeploys do not wipe RAG.
 - Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
 
+### Production (live)
+
+| Item | Value |
+| --- | --- |
+| Frontend | https://chatbot-widget-client.vercel.app |
+| Backend API | https://chatbot-widgetclient-production.up.railway.app |
+| `VITE_API_URL` | Set on Vercel → Railway HTTPS URL |
+| `ENVIRONMENT` | `production` on Railway (HSTS enabled) |
+| `CORS_ORIGINS` | Vercel production domain aligned with Railway |
+
 ### Production checklist
 
-- [ ] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
-- [ ] Railway: `CORS_ORIGINS` includes your Vercel URL
-- [ ] Vercel: `VITE_API_URL` = Railway HTTPS URL; production redeploy completed
-- [ ] Smoke test: signup → chat → upload → delete file
-- [ ] `curl.exe -sS -D - -o NUL https://YOUR-API/health` shows security headers + HSTS
+- [x] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
+- [x] Railway: `CORS_ORIGINS` includes Vercel URL
+- [x] Vercel: `VITE_API_URL` = Railway HTTPS URL; production redeploy completed
+- [x] Smoke test: signup → chat → upload → delete file
+- [x] Security headers + HSTS on `/health`
+
+---
+
+## Remaining work
+
+| Item | Status |
+| --- | --- |
+| **Conversation Detail tabs** (Messages / Files / Generated Files / Details) | Not built — `getConversationDetail()` unused |
+| **Embeddable npm package** (`build:lib` script-tag / drop-in widget) | Not built |
 
 ---
 
@@ -562,9 +585,4 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 **Last updated:** June 2026  
-<<<<<<< HEAD
-**Status:** Production-oriented widget with chat, RAG (versioned DB-persisted indexes), audit logging, auth rate limiting, file delete, per-user response cache, Gemini quota, and CI/CD (Railway + Vercel).
-
-=======
-**Status:** Production-oriented widget with chat, RAG, PDF generation, and CI/CD. Codebase trimmed to live runtime paths only.
->>>>>>> 6909d603009e4a5bc44d42c7b34c47b3bc893b2e
+**Status:** Production-deployed widget — security hardening sprint complete (sanitization, MIME magic bytes, body limits, audit logs, auth rate limit, per-user cache, FAISS versioning, file delete), 105 tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs and embeddable `build:lib` package.
