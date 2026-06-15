@@ -50,7 +50,7 @@ def test_gemini_daily_quota_returns_429(client, auth_headers, conversation_id, m
     monkeypatch.setattr(settings, "GEMINI_DAILY_QUOTA_PER_USER", 1)
     monkeypatch.setattr(
         "app.services.chat_service._call_gemini",
-        lambda *args, **kwargs: ("ok", None),
+        lambda *args, **kwargs: ("ok", None, None),
     )
     monkeypatch.setattr(
         "app.services.chat_service._stream_gemini",

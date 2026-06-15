@@ -73,9 +73,63 @@ def reindex_file(db: Session, file_id: str) -> None:
     if not extracted_text or not extracted_text.strip():
         raise ValueError(f"No text extracted from {row.filename}")
 
-    chunk_and_store(file_id, extracted_text, db=db)
+    row_chunks = file_parser_service.parse_row_chunks(row.file_path, row.filename)
+    chunk_and_store(
+        file_id,
+        extracted_text,
+        db=db,
+        chunks=row_chunks,
+        raw_text=extracted_text,
+    )
     row.status = "processed"
     db.commit()
+
+
+def _normalize_exact_key(value: str) -> str:
+    """Lowercase and strip hyphens, spaces, underscores for part-number matching."""
+    return re.sub(r"[\s\-_]+", "", (value or "").lower())
+
+
+def _exact_string_search(raw_text: str, query: str) -> Optional[str]:
+    """
+    Find a chunk/line in raw_text whose normalized form contains the normalized query.
+    Returns the original segment text, or None.
+    """
+    if not raw_text or not query:
+        return None
+
+    normalized_query = _normalize_exact_key(query)
+    if not normalized_query:
+        return None
+
+    for segment in raw_text.split("\n"):
+        cleaned = segment.strip()
+        if not cleaned:
+            continue
+        if normalized_query in _normalize_exact_key(cleaned):
+            return cleaned
+
+    if normalized_query in _normalize_exact_key(raw_text):
+        for segment in raw_text.split("\n"):
+            cleaned = segment.strip()
+            if cleaned and normalized_query in _normalize_exact_key(cleaned):
+                return cleaned
+        return raw_text.strip()
+
+    return None
+
+
+def _persist_raw_text(
+    file_id: str, raw_text: Optional[str], db: Optional[Session] = None
+) -> None:
+    if not raw_text or db is None:
+        return
+    from app.database.db import UploadedFile
+
+    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if row:
+        row.raw_text_blob = raw_text
+        db.commit()
 
 
 def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
@@ -300,28 +354,37 @@ def _chunk_and_store_with_faiss(
     _index_memory_cache[file_id] = (index, chunks)
 
 
-def chunk_and_store(file_id: str, text: str, db: Optional[Session] = None):
-    """Split text, embed when possible, and persist chunks + optional FAISS index."""
-    chunks = split_text(text)
-    if not chunks:
+def chunk_and_store(
+    file_id: str,
+    text: str,
+    db: Optional[Session] = None,
+    *,
+    chunks: Optional[List[str]] = None,
+    raw_text: Optional[str] = None,
+):
+    """Split text (or use pre-built row chunks), embed when possible, and persist."""
+    resolved_chunks = chunks if chunks is not None else split_text(text)
+    if not resolved_chunks:
         raise ValueError("No indexable text chunks after splitting document")
+
+    _persist_raw_text(file_id, raw_text or text, db)
 
     if not ml_stack_available():
         print(
             "[EMBED] FAISS/sentence-transformers not installed — "
             "storing text chunks with keyword search fallback"
         )
-        _store_chunks_only(file_id, chunks, db)
+        _store_chunks_only(file_id, resolved_chunks, db)
         return
 
     try:
-        _chunk_and_store_with_faiss(file_id, chunks, db)
+        _chunk_and_store_with_faiss(file_id, resolved_chunks, db)
     except ImportError as exc:
         print(f"[EMBED] Embedding import failed ({exc}) — using text-only fallback")
-        _store_chunks_only(file_id, chunks, db)
+        _store_chunks_only(file_id, resolved_chunks, db)
     except Exception as exc:
         print(f"[EMBED] FAISS indexing failed ({exc}) — using text-only fallback")
-        _store_chunks_only(file_id, chunks, db)
+        _store_chunks_only(file_id, resolved_chunks, db)
 
 
 def search(
@@ -333,6 +396,16 @@ def search(
     """Search matching chunks across multiple file IDs."""
     if not file_ids:
         return []
+
+    if db is not None:
+        from app.database.db import UploadedFile
+
+        for file_id in file_ids:
+            row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+            if row and row.raw_text_blob:
+                exact_hit = _exact_string_search(row.raw_text_blob, query)
+                if exact_hit:
+                    return [exact_hit]
 
     all_matches: list[tuple[str, float]] = []
 

@@ -36,8 +36,15 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
             raise ValueError(f"No text extracted from {filename}")
 
         print(f"[EMBED] Extracted {len(extracted_text)} characters")
+        row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
         print(f"[EMBED] Creating FAISS index for {file_id}")
-        vector_store_service.chunk_and_store(file_id, extracted_text, db=db)
+        vector_store_service.chunk_and_store(
+            file_id,
+            extracted_text,
+            db=db,
+            chunks=row_chunks,
+            raw_text=extracted_text,
+        )
         print(f"[EMBED] FAISS index created successfully")
 
         db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()

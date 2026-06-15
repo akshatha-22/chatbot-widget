@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Maximize2, Minus, X, Paperclip, Send, Mic, LogOut, Download } from 'lucide-react'
+import { Maximize2, Minus, X, Paperclip, Send, Mic, LogOut } from 'lucide-react'
 import { streamSendMessage } from './streamSend'
 import type { Message, Conversation, UploadedFile } from '../../types'
 import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import FileUploadModal from './FileUploadModal'
-import AssistantMarkdown from './AssistantMarkdown'
+import MessageBubble from './MessageBubble'
 import RemiAvatar2D from './RemiAvatar2D'
 import { RateLimitBanner } from './RateLimitBanner'
 import { NavTooltip, WidgetTooltipProvider } from './NavTooltip'
@@ -200,21 +200,22 @@ export default function CompactWidget({
                       : 'bg-[#F5F5F5] text-[#1A1A1A]'
                   }`}
                 >
-                  {isUser ? m.content : <AssistantMarkdown content={m.content} />}
-                  {!isUser && m.has_pdf && m.pdf_content && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void generatePDFFromContent(
-                          m.pdf_content!,
-                          m.pdf_filename || 'remi-generated.pdf',
-                        )
+                  {isUser ? (
+                    m.content
+                  ) : (
+                    <MessageBubble
+                      message={m}
+                      isUser={false}
+                      onDownloadPdf={
+                        m.has_pdf && m.pdf_content
+                          ? () =>
+                              void generatePDFFromContent(
+                                m.pdf_content!,
+                                m.pdf_filename || 'remi-generated.pdf',
+                              )
+                          : undefined
                       }
-                      className="mt-2 flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium underline-offset-2 hover:underline"
-                    >
-                      <Download size={12} />
-                      Download PDF again
-                    </button>
+                    />
                   )}
                 </div>
                 <span

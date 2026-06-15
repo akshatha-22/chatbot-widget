@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     LargeBinary,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from app.config import settings
@@ -59,6 +60,8 @@ class Message(Base):
     has_pdf = Column(Boolean, default=False)
     pdf_content = Column(Text, nullable=True)
     pdf_filename = Column(String(255), nullable=True)
+    source = Column(String(50), default="catalog", nullable=False)
+    links = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="messages")
@@ -74,6 +77,7 @@ class UploadedFile(Base):
     faiss_index_blob = Column(LargeBinary, nullable=True)
     chunks_blob = Column(LargeBinary, nullable=True)
     embedding_model_version = Column(String(100), nullable=True)
+    raw_text_blob = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="files")

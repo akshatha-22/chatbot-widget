@@ -58,7 +58,7 @@ def test_reindex_file_updates_version(db_session, monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "app.services.vector_store_service.chunk_and_store",
-        lambda file_id, text, db=None: None,
+        lambda file_id, text, db=None, **kwargs: None,
     )
 
     with patch.object(vector_store_service, "clear_memory_cache"):
