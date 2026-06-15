@@ -60,7 +60,7 @@ class Message(Base):
     has_pdf = Column(Boolean, default=False)
     pdf_content = Column(Text, nullable=True)
     pdf_filename = Column(String(255), nullable=True)
-    source = Column(String(50), default="catalog", nullable=False)
+    source = Column(String(50), default="document", nullable=False)
     links = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     

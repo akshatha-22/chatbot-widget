@@ -86,12 +86,12 @@ def _migrate_message_source_links_columns() -> None:
     if "source" not in existing:
         if _is_sqlite():
             alters.append(
-                "ALTER TABLE messages ADD COLUMN source VARCHAR(50) DEFAULT 'catalog'"
+                "ALTER TABLE messages ADD COLUMN source VARCHAR(50) DEFAULT 'document'"
             )
         else:
             alters.append(
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
-                "source VARCHAR(50) DEFAULT 'catalog'"
+                "source VARCHAR(50) DEFAULT 'document'"
             )
     if "links" not in existing:
         if _is_sqlite():

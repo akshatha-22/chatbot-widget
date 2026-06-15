@@ -19,7 +19,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "messages",
-        sa.Column("source", sa.String(length=50), server_default="catalog", nullable=False),
+        sa.Column("source", sa.String(length=50), server_default="document", nullable=False),
     )
     op.add_column(
         "messages",

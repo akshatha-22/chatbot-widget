@@ -67,19 +67,10 @@ code {
 .remi-source-badge {
   margin-top: 6px;
   font-size: 11px;
-  opacity: 0.75;
-}
-
-.remi-badge-catalog {
-  color: #1565c0;
-}
-
-.remi-badge-web {
-  color: #2979ff;
-}
-
-.remi-badge-none {
-  color: #f59e0b;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .remi-external-links {
@@ -93,6 +84,8 @@ code {
   font-weight: 600;
   opacity: 0.6;
   margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .remi-links-list {
@@ -101,17 +94,18 @@ code {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .remi-link-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   font-size: 12px;
   color: #2979ff;
   text-decoration: none;
-  word-break: break-all;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .remi-link-item:hover {

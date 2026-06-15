@@ -1,11 +1,45 @@
 import { ExternalLink } from 'lucide-react'
 import AssistantMarkdown from './AssistantMarkdown'
 import type { Message } from '../../types'
+import type { TMessageSource } from '../../types/chat'
 
 type MessageBubbleProps = {
   message: Message
   isUser: boolean
   onDownloadPdf?: () => void
+}
+
+const SOURCE_CONFIG: Record<
+  TMessageSource,
+  { icon: string; label: string; color: string }
+> = {
+  document: {
+    icon: '📄',
+    label: 'From your document',
+    color: '#1565c0',
+  },
+  both: {
+    icon: '📄🌐',
+    label: 'From your document + web',
+    color: '#2979FF',
+  },
+  web: {
+    icon: '🌐',
+    label: 'From the web — not in your document',
+    color: '#2979FF',
+  },
+  none: {
+    icon: '⚠️',
+    label: 'Not found in document or web',
+    color: '#f59e0b',
+  },
+}
+
+function normalizeSource(source?: string): TMessageSource | null {
+  if (!source) return null
+  if (source === 'catalog') return 'document'
+  if (source in SOURCE_CONFIG) return source as TMessageSource
+  return null
 }
 
 export default function MessageBubble({
@@ -17,7 +51,7 @@ export default function MessageBubble({
     return <>{message.content}</>
   }
 
-  const source = message.source ?? 'catalog'
+  const source = normalizeSource(message.source)
   const links = message.links ?? []
 
   return (
@@ -33,37 +67,36 @@ export default function MessageBubble({
         </button>
       )}
 
-      <div className="remi-source-badge">
-        {source === 'catalog' && (
-          <span className="remi-badge-catalog">📄 From your catalog</span>
-        )}
-        {source === 'web' && (
-          <span className="remi-badge-web">🌐 From public web — not in your catalog</span>
-        )}
-        {source === 'none' && (
-          <span className="remi-badge-none">⚠️ Not found anywhere</span>
-        )}
-      </div>
+      {source && (
+        <>
+          <div
+            className="remi-source-badge"
+            style={{ color: SOURCE_CONFIG[source].color }}
+          >
+            {SOURCE_CONFIG[source].icon} {SOURCE_CONFIG[source].label}
+          </div>
 
-      {source === 'web' && links.length > 0 && (
-        <div className="remi-external-links">
-          <p className="remi-links-header">Sources</p>
-          <ul className="remi-links-list">
-            {links.map((link, index) => (
-              <li key={`${link.url}-${index}`}>
-                <a
-                  href={link.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="remi-link-item"
-                >
-                  <ExternalLink size={11} className="remi-link-icon" />
-                  <span>{link.title}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
+          {['web', 'both'].includes(source) && links.length > 0 && (
+            <div className="remi-external-links">
+              <p className="remi-links-header">Sources</p>
+              <ul className="remi-links-list">
+                {links.map((link, index) => (
+                  <li key={`${link.url}-${index}`}>
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="remi-link-item"
+                    >
+                      <ExternalLink size={11} className="remi-link-icon" />
+                      <span>{link.title}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
     </>
   )

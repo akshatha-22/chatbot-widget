@@ -8,6 +8,8 @@ export interface Conversation {
   updated_at?: string
 }
 
+import type { TMessageSource } from '../types/chat'
+
 export interface Message {
   id: string
   conversation_id?: string
@@ -18,7 +20,7 @@ export interface Message {
   pdf_content?: string | null
   pdf_filename?: string | null
   cache_hit?: boolean
-  source?: 'catalog' | 'web' | 'none'
+  source?: TMessageSource | 'catalog'
   links?: { url: string; title: string }[]
 }
 
@@ -49,7 +51,7 @@ export async function getConversationMessages(
     has_pdf: m.has_pdf ?? false,
     pdf_content: m.pdf_content ?? null,
     pdf_filename: m.pdf_filename ?? null,
-    source: m.source ?? 'catalog',
+    source: m.source === 'catalog' ? 'document' : (m.source ?? 'document'),
     links: m.links ?? [],
   }))
 }
@@ -86,7 +88,7 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
       pdf_content?: string | null
       pdf_filename?: string | null
       cache_hit?: boolean
-      source?: 'catalog' | 'web' | 'none'
+      source?: TMessageSource | 'catalog'
       links?: { url: string; title: string }[]
     }
     if (parsed.event === 'done' && parsed.content != null) {
@@ -101,7 +103,10 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
           pdf_content: parsed.pdf_content ?? null,
           pdf_filename: parsed.pdf_filename ?? null,
           cache_hit: parsed.cache_hit ?? false,
-          source: parsed.source ?? 'catalog',
+          source:
+            parsed.source === 'catalog'
+              ? 'document'
+              : (parsed.source ?? 'document'),
           links: parsed.links ?? [],
         },
       }
@@ -230,7 +235,7 @@ export async function sendMessage(
     has_pdf: assistant.has_pdf ?? false,
     pdf_content: assistant.pdf_content ?? null,
     pdf_filename: assistant.pdf_filename ?? null,
-    source: assistant.source ?? 'catalog',
+    source: assistant.source === 'catalog' ? 'document' : (assistant.source ?? 'document'),
     links: assistant.links ?? [],
   }
 }
@@ -291,7 +296,7 @@ export async function getConversationDetail(
       has_pdf: m.has_pdf ?? false,
       pdf_content: m.pdf_content ?? null,
       pdf_filename: m.pdf_filename ?? null,
-      source: m.source ?? 'catalog',
+      source: m.source === 'catalog' ? 'document' : (m.source ?? 'document'),
       links: m.links ?? [],
     })),
   }
