@@ -14,6 +14,13 @@ MARKDOWN_INSTRUCTION = (
     "**bold** for key terms, and blank lines between paragraphs."
 )
 
+NOT_FOUND_CATALOG_MESSAGE = (
+    "This item isn't in your catalog and I couldn't find any public information "
+    "about it. It may be internal, discontinued, or proprietary."
+)
+
+MIN_RAG_CONTEXT_CHARS = 1
+
 def _gemini_models_to_try() -> List[str]:
     """Primary model from settings, then sensible fallbacks (gemini-pro is retired)."""
     primary = (settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
@@ -47,7 +54,7 @@ def ensure_gemini_quota(
         return
 
     rag_context = build_rag_context(db, conversation_id, user_message)
-    use_search = not bool(rag_context.strip())
+    use_search = not _rag_has_confident_match(rag_context)
     if response_cache.get_cached_response(user_id, user_message, rag_context, use_search):
         return
 
@@ -125,11 +132,12 @@ def _stream_gemini_without_search(prompt: str) -> Iterator[str]:
             print(f"Gemini (no search) stream error ({model_name}): {e}")
 
 
-def _call_gemini_with_search(prompt: str) -> tuple[Optional[str], Optional[str]]:
+def _call_gemini_with_search(prompt: str) -> tuple[Optional[str], Optional[str], Optional[object]]:
     """Gemini via google-genai with Google Search grounding."""
     client = _gemini_genai_client()
     config = _gemini_grounding_config()
     last_error: Optional[str] = None
+    last_response: Optional[object] = None
 
     for model_name in _gemini_models_to_try():
         try:
@@ -138,14 +146,15 @@ def _call_gemini_with_search(prompt: str) -> tuple[Optional[str], Optional[str]]
                 contents=prompt,
                 config=config,
             )
+            last_response = response
             text = _response_text(response)
             if text:
-                return text, None
+                return text, None, response
         except Exception as e:
             last_error = f"{model_name}: {e}"
             print(f"Gemini search error ({model_name}): {e}")
 
-    return None, last_error
+    return None, last_error, last_response
 
 
 def _call_gemini_legacy(prompt: str) -> tuple[Optional[str], Optional[str]]:
@@ -169,35 +178,41 @@ def _call_gemini_legacy(prompt: str) -> tuple[Optional[str], Optional[str]]:
     return None, last_error
 
 
-def _call_gemini(prompt: str, *, use_search: bool = True) -> tuple[Optional[str], Optional[str]]:
-    """Returns (text, error_detail). Prefers Search-grounded google-genai, then legacy."""
+def _call_gemini(
+    prompt: str, *, use_search: bool = True
+) -> tuple[Optional[str], Optional[str], Optional[object]]:
+    """Returns (text, error_detail, raw_response for grounding)."""
     if not _gemini_configured():
-        return None, None
+        return None, None, None
 
     if not use_search:
         try:
             text, err = _call_gemini_without_search(prompt)
             if text:
-                return text, None
+                return text, None, None
         except ImportError:
             print("google-genai not installed; using legacy Gemini client.")
         except Exception as e:
             print(f"Gemini (no search) client failed: {e}")
-        return _call_gemini_legacy(prompt)
+        text, err = _call_gemini_legacy(prompt)
+        return text, err, None
 
     try:
-        text, err = _call_gemini_with_search(prompt)
+        text, err, response = _call_gemini_with_search(prompt)
         if text:
-            return text, None
+            return text, None, response
     except ImportError:
         print("google-genai not installed; using legacy Gemini client without search.")
     except Exception as e:
         print(f"Gemini search client failed: {e}")
 
-    return _call_gemini_legacy(prompt)
+    text, err = _call_gemini_legacy(prompt)
+    return text, err, None
 
 
-def _stream_gemini_with_search(prompt: str) -> Iterator[str]:
+def _stream_gemini_with_search(
+    prompt: str, stream_meta: Optional[dict] = None
+) -> Iterator[str]:
     client = _gemini_genai_client()
     config = _gemini_grounding_config()
 
@@ -210,6 +225,8 @@ def _stream_gemini_with_search(prompt: str) -> Iterator[str]:
             )
             yielded = False
             for chunk in stream:
+                if stream_meta is not None:
+                    stream_meta["last_chunk"] = chunk
                 text = _stream_chunk_text(chunk)
                 if text:
                     yielded = True
@@ -241,7 +258,9 @@ def _stream_gemini_legacy(prompt: str) -> Iterator[str]:
             print(f"Gemini legacy stream error ({model_name}): {e}")
 
 
-def _stream_gemini(prompt: str, *, use_search: bool = True) -> Iterator[str]:
+def _stream_gemini(
+    prompt: str, *, use_search: bool = True, stream_meta: Optional[dict] = None
+) -> Iterator[str]:
     """Stream Gemini reply; uses Google Search grounding when enabled and available."""
     if not _gemini_configured():
         return
@@ -263,7 +282,7 @@ def _stream_gemini(prompt: str, *, use_search: bool = True) -> Iterator[str]:
 
     streamed = False
     try:
-        for piece in _stream_gemini_with_search(prompt):
+        for piece in _stream_gemini_with_search(prompt, stream_meta=stream_meta):
             streamed = True
             yield piece
         if streamed:
@@ -274,6 +293,36 @@ def _stream_gemini(prompt: str, *, use_search: bool = True) -> Iterator[str]:
         print(f"Gemini search stream failed: {e}")
 
     yield from _stream_gemini_legacy(prompt)
+
+
+def extract_grounding_links(response) -> List[dict]:
+    """
+    Extract web source URLs and titles from Gemini grounding metadata.
+    Returns [] if grounding metadata is absent or malformed.
+    Never raises — all errors swallowed silently.
+    """
+    links: List[dict] = []
+    try:
+        chunks = (
+            response.candidates[0]
+            .grounding_metadata
+            .grounding_chunks
+        )
+        for chunk in chunks:
+            if hasattr(chunk, "web") and chunk.web.uri:
+                links.append(
+                    {
+                        "url": chunk.web.uri,
+                        "title": chunk.web.title or chunk.web.uri,
+                    }
+                )
+    except Exception:
+        pass
+    return links[:5]
+
+
+def _rag_has_confident_match(rag_context: str) -> bool:
+    return len((rag_context or "").strip()) >= MIN_RAG_CONTEXT_CHARS
 
 
 def format_sse(text: str) -> str:
@@ -288,6 +337,7 @@ def format_sse(text: str) -> str:
 
 def format_sse_done(assistant_message: Message) -> str:
     """Final SSE event with persisted assistant message metadata."""
+    links = getattr(assistant_message, "links", None) or []
     payload = json.dumps(
         {
             "event": "done",
@@ -300,6 +350,9 @@ def format_sse_done(assistant_message: Message) -> str:
             "has_pdf": bool(getattr(assistant_message, "has_pdf", False)),
             "pdf_content": getattr(assistant_message, "pdf_content", None),
             "pdf_filename": getattr(assistant_message, "pdf_filename", None),
+            "cache_hit": bool(getattr(assistant_message, "cache_hit", False)),
+            "source": getattr(assistant_message, "source", "catalog") or "catalog",
+            "links": links,
         }
     )
     return f"data: {payload}\n\n"
@@ -456,20 +509,19 @@ def _create_pdf_assistant_message(
 
 def _prepare_assistant_context(
     db: Session, conversation_id: int, user_id: int, user_message: str
-) -> Tuple[Conversation, str, str, List[Message], Optional[str]]:
-    """Shared setup: auto-title, history, RAG, Gemini prompt. Returns gemini_error hint."""
+) -> Tuple[Conversation, str, str, List[Message], Optional[str], str, bool]:
+    """Shared setup: auto-title, history, RAG, tiered Gemini prompt."""
     conv = get_conversation(db, conversation_id, user_id)
 
     _DEFAULT_TITLES = ("New Conversation", "New Chat", "Conversation")
     if conv.title and conv.title not in _DEFAULT_TITLES:
-        pass  # user renamed — never overwrite a custom title
+        pass
     elif not conv.title or conv.title in _DEFAULT_TITLES:
         conv.title = user_message[:40] + ("..." if len(user_message) > 40 else "")
         db.add(conv)
         db.commit()
 
     ordered = sorted(conv.messages, key=lambda m: m.created_at or datetime.min)
-    # Exclude the message we are replying to (last row is the current user turn).
     history = ordered[-7:-1] if len(ordered) > 1 else []
     rag_context = build_rag_context(db, conversation_id, user_message)
 
@@ -478,23 +530,27 @@ def _prepare_assistant_context(
     if rag_context:
         print(f"[RAG] context preview: {rag_context[:200]}")
 
-    if rag_context:
+    if _rag_has_confident_match(rag_context):
+        source = "catalog"
+        use_search = False
         gemini_prompt = (
             "You are Remi, a helpful AI assistant.\n"
-            "The user has uploaded documents. You MUST use the document context below "
-            "to answer their question. Base your answer primarily on the provided context. "
-            "If the context contains the answer, use it directly. "
-            "Do not say you cannot access documents — the content is provided below.\n"
+            "Answer strictly from the document context below.\n"
+            "Do not use any external knowledge.\n"
             f"{MARKDOWN_INSTRUCTION}\n\n"
             f'DOCUMENT CONTEXT:\n"""\n{rag_context}\n"""\n\n'
-            "Answer based on the above context.\n\n"
         )
     else:
+        source = "web"
+        use_search = True
         gemini_prompt = (
-            "You are Remi, a helpful AI assistant. Answer the user's questions directly "
-            "and helpfully. Be concise and accurate.\n"
-            "You can use Google Search for real-time information (news, weather, live scores, "
-            "stock prices, current events). When search is used, cite sources briefly.\n"
+            "You are Remi, a helpful AI assistant.\n"
+            "The user's private catalog does not contain this item.\n"
+            "Search the web for publicly available information.\n"
+            "Begin your answer with exactly:\n"
+            '"This part isn\'t in your uploaded catalog.\n'
+            'Here\'s what I found from public sources:"\n'
+            "Then provide the answer followed by your sources.\n"
             f"{MARKDOWN_INSTRUCTION}\n\n"
         )
 
@@ -502,7 +558,7 @@ def _prepare_assistant_context(
         gemini_prompt += f"{msg.role.capitalize()}: {msg.content}\n"
     gemini_prompt += f"User: {user_message}\nAssistant:"
 
-    return conv, gemini_prompt, rag_context, history, None
+    return conv, gemini_prompt, rag_context, history, None, source, use_search
 
 
 def _fallback_assistant_content(
@@ -585,15 +641,18 @@ def _openai_assistant_content(
 
 
 def iter_assistant_chunks(
-    db: Session, conversation_id: int, user_id: int, user_message: str
+    db: Session, conversation_id: int, user_id: int, user_message: str,
+    stream_meta: Optional[dict] = None,
 ) -> Iterator[str]:
     """Yield assistant reply text chunks (Gemini stream, or one-shot fallback/OpenAI)."""
     user_message = prepare_user_message(user_message)
-    _conv, gemini_prompt, rag_context, history, _ = _prepare_assistant_context(
-        db, conversation_id, user_id, user_message
+    _conv, gemini_prompt, rag_context, history, _, source, use_search = (
+        _prepare_assistant_context(db, conversation_id, user_id, user_message)
     )
+    if stream_meta is not None:
+        stream_meta["source"] = source
+        stream_meta["use_search"] = use_search
 
-    use_search = not bool(rag_context.strip())
     cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
     if cached:
         yield cached
@@ -602,7 +661,9 @@ def iter_assistant_chunks(
     if _gemini_configured():
         streamed = False
         parts: List[str] = []
-        for piece in _stream_gemini(gemini_prompt, use_search=use_search):
+        for piece in _stream_gemini(
+            gemini_prompt, use_search=use_search, stream_meta=stream_meta
+        ):
             streamed = True
             parts.append(piece)
             yield piece
@@ -634,18 +695,41 @@ def stream_and_save_assistant(
         return
 
     parts: List[str] = []
-    for piece in iter_assistant_chunks(db, conversation_id, user_id, user_message):
+    stream_meta: dict = {}
+    for piece in iter_assistant_chunks(
+        db, conversation_id, user_id, user_message, stream_meta=stream_meta
+    ):
         parts.append(piece)
         event = format_sse(piece)
         if event:
             yield event
 
     assistant_content = "".join(parts).strip()
+    source = stream_meta.get("source", "catalog")
+    use_search = stream_meta.get("use_search", False)
+    links: List[dict] = []
+
+    if use_search and stream_meta.get("last_chunk") is not None:
+        links = extract_grounding_links(stream_meta["last_chunk"])
+
     if not assistant_content:
         assistant_content = _fallback_assistant_content(user_message, "", None)
 
+    if source == "web" and not assistant_content.strip():
+        assistant_content = NOT_FOUND_CATALOG_MESSAGE
+        source = "none"
+        links = []
+    elif source == "web" and not links and not _gemini_configured():
+        pass
+
     assistant_msg = create_message(
-        db, conversation_id, user_id, "assistant", assistant_content
+        db,
+        conversation_id,
+        user_id,
+        "assistant",
+        assistant_content,
+        source=source,
+        links=links,
     )
     yield format_sse_done(assistant_msg)
 
@@ -744,6 +828,8 @@ def create_message(
     pdf_content: Optional[str] = None,
     pdf_filename: Optional[str] = None,
     cache_hit: bool = False,
+    source: str = "catalog",
+    links: Optional[List[dict]] = None,
 ) -> Message:
     """Create a new message in a conversation after verifying user ownership."""
     get_conversation(db, conversation_id, user_id)
@@ -758,6 +844,8 @@ def create_message(
         has_pdf=has_pdf,
         pdf_content=pdf_content,
         pdf_filename=pdf_filename,
+        source=source,
+        links=links or [],
     )
     db.add(db_msg)
     db.commit()
@@ -818,24 +906,35 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     if pdf_topic is not None:
         return _create_pdf_assistant_message(db, conversation_id, user_id, pdf_topic)
 
-    _conv, gemini_prompt, rag_context, history, _ = _prepare_assistant_context(
-        db, conversation_id, user_id, user_message
+    _conv, gemini_prompt, rag_context, history, _, source, use_search = (
+        _prepare_assistant_context(db, conversation_id, user_id, user_message)
     )
 
     assistant_content = ""
     gemini_error: Optional[str] = None
+    links: List[dict] = []
 
-    use_search = not bool(rag_context.strip())
     cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
     if cached:
         return create_message(
-            db, conversation_id, user_id, "assistant", cached, cache_hit=True
+            db,
+            conversation_id,
+            user_id,
+            "assistant",
+            cached,
+            cache_hit=True,
+            source=source,
+            links=[],
         )
 
     if _gemini_configured():
-        assistant_content, gemini_error = _call_gemini(gemini_prompt, use_search=use_search)
+        assistant_content, gemini_error, response = _call_gemini(
+            gemini_prompt, use_search=use_search
+        )
         if assistant_content is None:
             assistant_content = ""
+        if use_search and response is not None:
+            links = extract_grounding_links(response)
 
     if not assistant_content:
         assistant_content = _openai_assistant_content(history, user_message, rag_context)
@@ -845,12 +944,25 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
             user_message, rag_context, gemini_error
         )
 
+    if source == "web" and not assistant_content.strip():
+        assistant_content = NOT_FOUND_CATALOG_MESSAGE
+        source = "none"
+        links = []
+
     if assistant_content and _gemini_configured():
         response_cache.set_cached_response(
             user_id, user_message, rag_context, use_search, assistant_content
         )
 
-    return create_message(db, conversation_id, user_id, "assistant", assistant_content)
+    return create_message(
+        db,
+        conversation_id,
+        user_id,
+        "assistant",
+        assistant_content,
+        source=source,
+        links=links,
+    )
 
 
 def generate_text(
@@ -864,7 +976,7 @@ def generate_text(
     if _gemini_configured():
         if db is not None and user_id is not None:
             quota_service.check_and_consume_gemini_quota(db, user_id)
-        content, _ = _call_gemini(prompt)
+        content, _, _ = _call_gemini(prompt)
         content = (content or "").strip()
 
     if not content and settings.openai_configured():

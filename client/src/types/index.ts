@@ -12,6 +12,14 @@ export interface Message {
   has_pdf?: boolean;
   pdf_content?: string | null;
   pdf_filename?: string | null;
+  cache_hit?: boolean;
+  source?: 'catalog' | 'web' | 'none';
+  links?: TExternalLink[];
+}
+
+export interface TExternalLink {
+  url: string;
+  title: string;
 }
 
 export interface UploadedFile {

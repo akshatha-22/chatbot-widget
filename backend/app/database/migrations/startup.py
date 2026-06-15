@@ -42,6 +42,7 @@ def _run_alters(statements: list[str]) -> None:
 def apply_startup_migrations() -> None:
     """Apply all idempotent schema patches."""
     _migrate_message_pdf_columns()
+    _migrate_message_source_links_columns()
     _migrate_uploaded_file_vector_columns()
     _migrate_gemini_usage_index()
 
@@ -76,6 +77,32 @@ def _migrate_message_pdf_columns() -> None:
     _run_alters(alters)
 
 
+def _migrate_message_source_links_columns() -> None:
+    existing = _column_names("messages")
+    if not existing:
+        return
+
+    alters: list[str] = []
+    if "source" not in existing:
+        if _is_sqlite():
+            alters.append(
+                "ALTER TABLE messages ADD COLUMN source VARCHAR(50) DEFAULT 'catalog'"
+            )
+        else:
+            alters.append(
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
+                "source VARCHAR(50) DEFAULT 'catalog'"
+            )
+    if "links" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE messages ADD COLUMN links JSON DEFAULT '[]'")
+        else:
+            alters.append(
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS links JSON DEFAULT '[]'"
+            )
+    _run_alters(alters)
+
+
 def _migrate_uploaded_file_vector_columns() -> None:
     existing = _column_names("uploaded_files")
     if not existing:
@@ -105,6 +132,14 @@ def _migrate_uploaded_file_vector_columns() -> None:
             alters.append(
                 "ALTER TABLE uploaded_files "
                 "ADD COLUMN IF NOT EXISTS embedding_model_version VARCHAR(100)"
+            )
+    if "raw_text_blob" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE uploaded_files ADD COLUMN raw_text_blob TEXT")
+        else:
+            alters.append(
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS raw_text_blob TEXT"
             )
     _run_alters(alters)
 

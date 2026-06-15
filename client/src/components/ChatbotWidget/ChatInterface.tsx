@@ -13,13 +13,12 @@ import {
   Mic,
   Check,
   X,
-  Download,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { Message, Conversation } from '../../types'
 import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import MessageEditModal from './MessageEditModal'
-import AssistantMarkdown from './AssistantMarkdown'
+import MessageBubble from './MessageBubble'
 import RemiAvatar2D from './RemiAvatar2D'
 import { RateLimitBanner } from './RateLimitBanner'
 import { NavTooltip } from './NavTooltip'
@@ -529,21 +528,22 @@ export default function ChatInterface({
                         : 'bg-[#F5F5F5] text-[#1A1A1A]'
                     }`}
                   >
-                    {isUser ? m.content : <AssistantMarkdown content={m.content} />}
-                    {!isUser && m.has_pdf && m.pdf_content && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void generatePDFFromContent(
-                            m.pdf_content!,
-                            m.pdf_filename || 'remi-generated.pdf',
-                          )
+                    {isUser ? (
+                      m.content
+                    ) : (
+                      <MessageBubble
+                        message={m}
+                        isUser={false}
+                        onDownloadPdf={
+                          m.has_pdf && m.pdf_content
+                            ? () =>
+                                void generatePDFFromContent(
+                                  m.pdf_content!,
+                                  m.pdf_filename || 'remi-generated.pdf',
+                                )
+                            : undefined
                         }
-                        className="mt-2 flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium underline-offset-2 hover:underline"
-                      >
-                        <Download size={12} />
-                        Download PDF again
-                      </button>
+                      />
                     )}
                   </div>
                 </div>
