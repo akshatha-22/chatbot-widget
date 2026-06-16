@@ -9,6 +9,7 @@ from app.services.rag_quality_service import RAGQuality, classify_rag_context
 from datetime import datetime
 import json
 import re
+from pathlib import Path
 
 MARKDOWN_INSTRUCTION = (
     "Always format your responses using markdown. Use bullet points for lists, "
@@ -85,9 +86,7 @@ def ensure_gemini_quota(
         return
 
     rag_context = build_rag_context(db, conversation_id, user_message)
-    _, _, use_search, _, _ = _resolve_retrieval_path(
-        db, conversation_id, rag_context, user_message
-    )
+    use_search = _resolve_use_search(db, conversation_id, rag_context, user_message)
     if response_cache.get_cached_response(user_id, user_message, rag_context, use_search):
         return
 
@@ -414,12 +413,89 @@ def _is_factual_lookup(query: str) -> bool:
         r"\bprice of\b",
         r"\bcost of\b",
         r"\btell me about\b",
+        r"\bscore\b",
     ]
     if any(re.search(p, msg_lower) for p in factual_patterns):
         return True
     if msg_lower.endswith("?"):
         return len(msg_lower.split()) <= 15
     return False
+
+
+def _has_uploaded_files(db: Session, conversation_id: int) -> bool:
+    return (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.conversation_id == conversation_id,
+            UploadedFile.status == "processed",
+        )
+        .count()
+        > 0
+    )
+
+
+def _get_searchable_file_ids(db: Session, conversation_id: int) -> List[str]:
+    """Processed files that have current-version pgvector rows."""
+    files = (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.conversation_id == conversation_id,
+            UploadedFile.status == "processed",
+        )
+        .all()
+    )
+    return [
+        f.id for f in files if vector_store_service.file_has_searchable_embeddings(db, f.id)
+    ]
+
+
+def _processed_filenames(db: Session, conversation_id: int) -> List[str]:
+    return [
+        row.filename
+        for row in db.query(UploadedFile)
+        .filter(
+            UploadedFile.conversation_id == conversation_id,
+            UploadedFile.status == "processed",
+        )
+        .all()
+    ]
+
+
+def _is_question_unrelated_to_documents(
+    user_message: str,
+    filenames: List[str],
+) -> bool:
+    """
+    Heuristic: question is clearly outside uploaded documents (e.g. current events).
+    Page queries and document references are always treated as related.
+    """
+    if vector_store_service.detect_page_query(user_message) is not None:
+        return False
+
+    msg = user_message.lower()
+    doc_signals = (
+        "document",
+        "uploaded",
+        "upload",
+        "my file",
+        "my pdf",
+        "the pdf",
+        "the catalog",
+        "the catalogue",
+        "in the doc",
+        "from my",
+        "page ",
+        "this manual",
+    )
+    if any(signal in msg for signal in doc_signals):
+        return False
+
+    for filename in filenames:
+        stem = Path(filename).stem.lower().replace("_", " ").replace("-", " ")
+        if len(stem) > 3 and stem in msg:
+            return False
+
+    return _is_factual_lookup(user_message)
 
 
 def _has_pending_files(db: Session, conversation_id: int) -> bool:
@@ -434,15 +510,6 @@ def _has_pending_files(db: Session, conversation_id: int) -> bool:
     )
 
 
-def _has_uploaded_files(db: Session, conversation_id: int) -> bool:
-    return (
-        db.query(UploadedFile)
-        .filter(UploadedFile.conversation_id == conversation_id)
-        .count()
-        > 0
-    )
-
-
 def _append_history_to_prompt(
     prompt: str, history: List[Message], user_message: str
 ) -> str:
@@ -450,6 +517,18 @@ def _append_history_to_prompt(
         prompt += f"{msg.role.capitalize()}: {msg.content}\n"
     prompt += f"User: {user_message}\nAssistant:"
     return prompt
+
+
+def _finalize_prompt_with_history(
+    body: str, history: List[Message], user_message: str
+) -> str:
+    if not history:
+        return body
+    history_block = "".join(f"{msg.role.capitalize()}: {msg.content}\n" for msg in history)
+    marker = f"Question: {user_message}"
+    if marker in body:
+        return body.replace(marker, f"{history_block}{marker}\nAssistant:")
+    return _append_history_to_prompt(body, history, user_message)
 
 
 def _is_conversational(query: str) -> bool:
@@ -559,91 +638,53 @@ def _resolve_use_search(
         return False
     if not _has_uploaded_files(db, conversation_id):
         return not _is_conversational(user_message)
+    if vector_store_service.detect_page_query(user_message) is not None:
+        return False
+    if not (rag_context or "").strip():
+        try:
+            unrelated = _is_question_unrelated_to_documents(
+                user_message, _processed_filenames(db, conversation_id)
+            )
+        except Exception:
+            unrelated = _is_factual_lookup(user_message)
+        return unrelated
     _, use_search, _ = _build_prompt_and_search_flag(rag_context, user_message)
     return use_search
 
 
-def _resolve_retrieval_path(
+def _page_not_found_message(
+    page_num: int,
     db: Session,
-    conversation_id: int,
-    rag_context: str,
-    user_message: str,
-) -> Tuple[str, str, bool, bool, Optional[str]]:
-    """
-    Returns (source, gemini_prompt_body, use_search, general_chat, fixed_response).
-    gemini_prompt_body excludes history — caller appends history + user turn.
-    """
-    pending = _has_pending_files(db, conversation_id)
-    has_files = _has_uploaded_files(db, conversation_id)
-
-    if pending and not (rag_context or "").strip():
-        return (
-            "document",
-            "",
-            False,
-            False,
-            PENDING_DOCUMENT_MESSAGE,
-        )
-
-    confidence = _rag_confidence(rag_context, user_message)
-
-    if confidence == "high":
-        body = (
-            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
-            "You are Remi, a helpful AI assistant.\n"
-            "Answer the user's question using the document context below.\n"
-            "Be specific and direct. Quote relevant details from the document.\n"
-            "If the document contains partial information, say so clearly.\n"
-            f"{MARKDOWN_INSTRUCTION}\n\n"
-            f"DOCUMENT CONTEXT:\n{rag_context}\n\n"
-        )
-        return "document", body, False, False, None
-
-    if confidence == "low":
-        body = (
-            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
-            "You are Remi, a helpful AI assistant.\n"
-            "The uploaded document contains some relevant information but "
-            "may not fully answer the question.\n\n"
-            "First, share what the document says:\n"
-            f"DOCUMENT CONTEXT:\n{rag_context}\n\n"
-            "Then supplement with current web information to give a "
-            "complete answer. Clearly separate what came from the "
-            "document vs what came from the web.\n"
-            'Label document info as: "From your document:"\n'
-            'Label web info as: "From the web:"\n'
-            f"{MARKDOWN_INSTRUCTION}\n\n"
-        )
-        return "both", body, True, False, None
-
-    # confidence == "none"
-    if not has_files:
-        if _is_factual_lookup(user_message):
-            body = (
-                "You are Remi, a helpful AI assistant.\n"
-                "The user has not uploaded any documents. Search the web and "
-                "provide a thorough answer with sources.\n"
-                f"{MARKDOWN_INSTRUCTION}\n\n"
-            )
-            return "web", body, True, False, None
-        body = (
-            "You are Remi, a helpful AI assistant.\n"
-            "Answer the user's message conversationally and helpfully.\n"
-            f"{MARKDOWN_INSTRUCTION}\n\n"
-        )
-        return "document", body, False, True, None
-
-    body = (
-        "You are Remi, a helpful AI assistant.\n"
-        "The uploaded document does not contain information "
-        "about this topic. Search the web and provide a "
-        "thorough answer with sources.\n\n"
-        "Begin your response with:\n"
-        '"This isn\'t covered in your uploaded document.\n'
-        ' Here\'s what I found online:"\n\n'
-        f"{MARKDOWN_INSTRUCTION}\n\n"
+    file_ids: List[str],
+) -> str:
+    max_page = vector_store_service.get_max_page_number(db, file_ids)
+    msg = (
+        f"I couldn't find page {page_num} in your uploaded document. "
+        "Try a different page number or re-index the file."
     )
-    return "web", body, True, False, None
+    if max_page > 0:
+        msg = (
+            f"I couldn't find page {page_num} in your uploaded document. "
+            f"The indexed content covers pages 1–{max_page}. "
+            "Try a different page number or re-index the file."
+        )
+    return msg
+
+
+def _document_miss_prompt(user_message: str) -> str:
+    """Prompt when documents exist but no relevant chunks were retrieved."""
+    return (
+        f"""{DOCUMENT_ACCESS_OVERRIDE}
+
+{MARKDOWN_INSTRUCTION}
+
+The uploaded document has no retrieved sections matching this question.
+Do NOT say you cannot access the user's document.
+Tell the user you searched their file but this specific information was not found
+in the retrieved sections. Suggest rephrasing or specifying a page number.
+
+User question: {user_message}"""
+    )
 
 
 def format_sse(text: str) -> str:
@@ -844,23 +885,77 @@ def _prepare_assistant_context(
 
     ordered = sorted(conv.messages, key=lambda m: m.created_at or datetime.min)
     history = ordered[-7:-1] if len(ordered) > 1 else []
-    rag_context = build_rag_context(db, conversation_id, user_message)
+
+    if _has_pending_files(db, conversation_id):
+        return conv, "", "", history, None, "document", False, PENDING_DOCUMENT_MESSAGE
+
+    file_ids = _get_searchable_file_ids(db, conversation_id)
+    has_documents = _has_uploaded_files(db, conversation_id)
+    rag_context = ""
+
+    if has_documents:
+        page_num = vector_store_service.detect_page_query(user_message)
+        if page_num is not None and file_ids:
+            page_context = vector_store_service.get_page_content(db, file_ids, page_num)
+            if page_context:
+                rag_context = page_context
+                print(f"[RAG] Page {page_num} direct retrieval: {len(page_context)} chars")
+            else:
+                fixed = _page_not_found_message(page_num, db, file_ids)
+                print(f"[RAG] Page {page_num} not found in indexed embeddings")
+                return conv, "", "", history, None, "document", False, fixed
+
+        if not rag_context:
+            rag_context = build_rag_context(db, conversation_id, user_message)
 
     print(f"[RAG] conversation_id: {conversation_id}")
     print(f"[RAG] context length: {len(rag_context)}")
     if rag_context:
         print(f"[RAG] context preview: {rag_context[:200]}")
 
-    source, prompt_body, use_search, general_chat, fixed_response = _resolve_retrieval_path(
-        db, conversation_id, rag_context, user_message
-    )
+    if not has_documents:
+        if _is_conversational(user_message):
+            body = (
+                "You are Remi, a helpful assistant.\n"
+                "Answer the user's message conversationally and helpfully.\n"
+                f"{MARKDOWN_INSTRUCTION}\n\n"
+            )
+            gemini_prompt = _append_history_to_prompt(body, history, user_message)
+            return conv, gemini_prompt, "", history, None, "document", False, None
 
-    if fixed_response:
-        gemini_prompt = ""
-    else:
-        gemini_prompt = _append_history_to_prompt(prompt_body, history, user_message)
+        body = (
+            "You are Remi, a helpful assistant.\n"
+            "Answer this question thoroughly using web search.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+            f"Question: {user_message}"
+        )
+        gemini_prompt = _finalize_prompt_with_history(body, history, user_message)
+        return conv, gemini_prompt, "", history, None, "web", True, None
 
-    return conv, gemini_prompt, rag_context, history, None, source, use_search, fixed_response
+    if rag_context:
+        prompt_body, use_search, source = _build_prompt_and_search_flag(
+            rag_context, user_message
+        )
+        gemini_prompt = _finalize_prompt_with_history(prompt_body, history, user_message)
+        return conv, gemini_prompt, rag_context, history, None, source, use_search, None
+
+    filenames = _processed_filenames(db, conversation_id)
+    if _is_question_unrelated_to_documents(user_message, filenames):
+        body = (
+            "You are Remi, a helpful assistant.\n"
+            "The user has uploaded documents, but this question is clearly outside them.\n"
+            "Search the web and provide a thorough answer.\n"
+            "Begin with: \"This isn't covered in your uploaded document — "
+            "here's what I found online:\"\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+            f"Question: {user_message}"
+        )
+        gemini_prompt = _finalize_prompt_with_history(body, history, user_message)
+        return conv, gemini_prompt, "", history, None, "web", True, None
+
+    prompt_body = _document_miss_prompt(user_message)
+    gemini_prompt = _finalize_prompt_with_history(prompt_body, history, user_message)
+    return conv, gemini_prompt, "", history, None, "document", False, None
 
 
 def _fallback_assistant_content(
@@ -1295,6 +1390,14 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
         assistant_content = NOT_FOUND_MESSAGE
         source = "none"
         links = []
+
+    if (
+        not assistant_content.strip()
+        and source == "document"
+        and not (rag_context or "").strip()
+    ):
+        assistant_content = NOT_FOUND_MESSAGE
+        source = "none"
 
     if assistant_content and _gemini_configured():
         response_cache.set_cached_response(

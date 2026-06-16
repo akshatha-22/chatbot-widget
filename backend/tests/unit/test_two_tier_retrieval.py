@@ -71,12 +71,13 @@ def test_extract_grounding_links_skips_chunks_without_uri():
     assert links == [{"url": "https://ok.example", "title": "OK"}]
 
 
+@patch("app.services.chat_service._has_uploaded_files", return_value=True)
 @patch("app.services.chat_service._gemini_configured", return_value=True)
 @patch("app.services.chat_service._call_gemini")
 @patch("app.services.chat_service._openai_assistant_content", return_value="")
 @patch("app.services.chat_service.build_rag_context", return_value=HIGH_CONFIDENCE_CONTEXT)
 def test_high_confidence_sets_document_source(
-    mock_rag, mock_openai, mock_gemini, _mock_cfg, client, auth_headers, conversation_id
+    mock_rag, mock_openai, mock_gemini, _mock_cfg, _mock_files, client, auth_headers, conversation_id
 ):
     mock_gemini.return_value = ("Answer from document", None, None)
 
