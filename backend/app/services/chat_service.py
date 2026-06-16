@@ -86,9 +86,7 @@ def ensure_gemini_quota(
         return
 
     rag_context = build_rag_context(db, conversation_id, user_message)
-    _, _, use_search, _, _ = _resolve_retrieval_path(
-        db, conversation_id, rag_context, user_message
-    )
+    use_search = _resolve_use_search(db, conversation_id, rag_context, user_message)
     if response_cache.get_cached_response(user_id, user_message, rag_context, use_search):
         return
 
@@ -368,6 +366,18 @@ def _rag_confidence(rag_context: str, query: str) -> str:
     query_terms = set(query.lower().split())
     context_lower = rag_context.lower()
 
+    matches = sum(
+        1 for term in query_terms if len(term) > 3 and term in context_lower
+    )
+    coverage = matches / max(len([t for t in query_terms if len(t) > 3]), 1)
+
+    if coverage >= 0.6:
+        return "high"
+    if coverage >= 0.2:
+        return "low"
+    return "none"
+
+
 def _is_general_conversational_message(query: str) -> bool:
     """True for greetings, creative tasks, opinions — skip web search when no files."""
     msg_lower = query.lower().strip()
@@ -417,7 +427,7 @@ def _has_uploaded_files(db: Session, conversation_id: int) -> bool:
         db.query(UploadedFile)
         .filter(
             UploadedFile.conversation_id == conversation_id,
-            UploadedFile.status.in_(("pending", "extracting", "embedding")),
+            UploadedFile.status == "processed",
         )
         .count()
         > 0
@@ -491,7 +501,10 @@ def _is_question_unrelated_to_documents(
 def _has_pending_files(db: Session, conversation_id: int) -> bool:
     return (
         db.query(UploadedFile)
-        .filter(UploadedFile.conversation_id == conversation_id)
+        .filter(
+            UploadedFile.conversation_id == conversation_id,
+            UploadedFile.status.in_(("pending", "extracting", "embedding")),
+        )
         .count()
         > 0
     )
@@ -504,6 +517,18 @@ def _append_history_to_prompt(
         prompt += f"{msg.role.capitalize()}: {msg.content}\n"
     prompt += f"User: {user_message}\nAssistant:"
     return prompt
+
+
+def _finalize_prompt_with_history(
+    body: str, history: List[Message], user_message: str
+) -> str:
+    if not history:
+        return body
+    history_block = "".join(f"{msg.role.capitalize()}: {msg.content}\n" for msg in history)
+    marker = f"Question: {user_message}"
+    if marker in body:
+        return body.replace(marker, f"{history_block}{marker}\nAssistant:")
+    return _append_history_to_prompt(body, history, user_message)
 
 
 def _is_conversational(query: str) -> bool:
@@ -898,10 +923,14 @@ def _prepare_assistant_context(
             gemini_prompt = _append_history_to_prompt(body, history, user_message)
             return conv, gemini_prompt, "", history, None, "document", False, None
 
-    if fixed_response:
-        gemini_prompt = ""
-    else:
-        gemini_prompt = _append_history_to_prompt(prompt_body, history, user_message)
+        body = (
+            "You are Remi, a helpful assistant.\n"
+            "Answer this question thoroughly using web search.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+            f"Question: {user_message}"
+        )
+        gemini_prompt = _finalize_prompt_with_history(body, history, user_message)
+        return conv, gemini_prompt, "", history, None, "web", True, None
 
     if rag_context:
         prompt_body, use_search, source = _build_prompt_and_search_flag(
