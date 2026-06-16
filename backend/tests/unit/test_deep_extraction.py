@@ -103,6 +103,36 @@ def test_non_pdf_returns_page_one_marker(tmp_path):
     assert "Hello world" in text
 
 
+def test_ocr_capped_at_max_pages(tmp_path, monkeypatch):
+    path = _make_pdf(tmp_path, [f"Page {i}" for i in range(1, 16)], "big.pdf")
+    monkeypatch.setattr(file_parser_service, "_get_pdf_page_count", lambda p: 15)
+
+    with patch("pdfplumber.open", side_effect=RuntimeError("no plumber")):
+        with patch(
+            "app.services.file_parser_service._extract_pymupdf_pages_parallel",
+            return_value={},
+        ):
+            with patch("PyPDF2.PdfReader", side_effect=RuntimeError("no pypdf2")):
+                with patch(
+                    "app.services.file_parser_service._gemini_ocr_page",
+                    return_value="OCR page",
+                ) as mock_ocr:
+                    file_parser_service._extract_pdf_deep(path, "big.pdf")
+
+    assert mock_ocr.call_count == file_parser_service.MAX_OCR_PAGES
+
+
+def test_page_truncation_at_max_chars(tmp_path, monkeypatch):
+    long_text = "x" * 5000
+    path = _make_pdf(tmp_path, [long_text], "dense.pdf")
+    monkeypatch.setattr(file_parser_service, "MAX_CHARS_PER_PAGE", 3000)
+
+    text = file_parser_service.extract_text_with_pages(path, "dense.pdf")
+    assert "[PAGE 1]" in text
+    page_body = text.split("[PAGE 1]\n", 1)[1]
+    assert len(page_body.strip()) <= 3000
+
+
 def test_corrupted_pdfplumber_page_skipped(tmp_path):
     path = _make_pdf(tmp_path, ["Good page"])
 

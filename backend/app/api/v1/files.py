@@ -48,6 +48,7 @@ def _build_file_response(db_file: UploadedFile, db: Session | None = None) -> Fi
         conversation_id=db_file.conversation_id,
         created_at=db_file.created_at,
         processing_error=db_file.processing_error,
+        status_detail=db_file.status_detail,
         embedding_model_version=db_file.embedding_model_version,
         stale=_file_is_stale(db_file),
     )
@@ -58,6 +59,7 @@ def _set_file_status(
     status: str,
     *,
     processing_error: str | None = None,
+    status_detail: str | None = None,
 ) -> None:
     """Update file status in a dedicated session (safe after chunk_and_store commits)."""
     db = SessionLocal()
@@ -68,6 +70,8 @@ def _set_file_status(
         db_file.status = status
         if processing_error is not None:
             db_file.processing_error = processing_error[:500] if processing_error else None
+        if status_detail is not None:
+            db_file.status_detail = status_detail[:500] if status_detail else None
         db.commit()
     except Exception as exc:
         logger.error("Failed to set status %s for %s: %s", status, file_id, exc)
@@ -83,7 +87,12 @@ def _finalize_file_status(
     processing_error: str | None = None,
 ) -> None:
     """Always persist terminal status (processed/failed) in a fresh session."""
-    _set_file_status(file_id, status, processing_error=processing_error)
+    _set_file_status(
+        file_id,
+        status,
+        processing_error=processing_error,
+        status_detail="",
+    )
 
 
 def _embedding_chunk_count(file_id: str) -> int:
@@ -135,15 +144,27 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
         print("[EMBED] WARNING: GEMINI_API_KEY is not configured — embedding will fail")
 
     try:
-        _set_file_status(file_id, "extracting")
+        def _on_extract_progress(detail: str) -> None:
+            _set_file_status(file_id, "extracting", status_detail=detail)
+
+        _set_file_status(file_id, "extracting", status_detail="Starting extraction…")
         print(f"[EMBED] Extracting text from {filename}")
-        extracted_text = file_parser_service.extract_text(file_path, filename)
+        extracted_text = file_parser_service.extract_text(
+            file_path,
+            filename,
+            on_progress=_on_extract_progress,
+        )
         if not extracted_text or not extracted_text.strip():
             raise ValueError(f"No text extracted from {filename}")
 
         print(f"[EMBED] Extracted {len(extracted_text)} characters")
         row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
-        _set_file_status(file_id, "embedding")
+        chunk_hint = len(row_chunks) if row_chunks else max(1, len(extracted_text) // 1000)
+        _set_file_status(
+            file_id,
+            "embedding",
+            status_detail=f"Indexing {chunk_hint} section(s)…",
+        )
         print(f"[EMBED] Creating pgvector embeddings for {file_id}")
 
         embed_db = SessionLocal()

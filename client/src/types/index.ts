@@ -25,6 +25,7 @@ export interface UploadedFile {
   status: 'pending' | 'extracting' | 'embedding' | 'processed' | 'failed';
   created_at: string;
   processing_error?: string | null;
+  status_detail?: string | null;
   embedding_model_version?: string | null;
   stale?: boolean;
 }

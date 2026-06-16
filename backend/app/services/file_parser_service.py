@@ -2,8 +2,9 @@ import csv
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,12 @@ PAGE_MARKER_RE = re.compile(r"\[PAGE\s+\d+\]", re.IGNORECASE)
 
 MAX_PDF_OCR_BYTES = 100 * 1024 * 1024
 PDF_FILE_API_THRESHOLD_BYTES = 4 * 1024 * 1024
+MIN_TEXT_LENGTH = 20
+MAX_OCR_PAGES = 10
+MAX_CHARS_PER_PAGE = 3000
+PYMUPDF_MAX_WORKERS = 4
+
+ProgressCallback = Callable[[str], None]
 
 
 def is_row_chunked_format(filename: str) -> bool:
@@ -148,11 +155,35 @@ def _format_tables(tables: list) -> str:
 
 
 def _missing_pages(all_pages: Dict[int, str], total_pages: int) -> List[int]:
+    """Pages with no extractable text at all (for local extractors)."""
     return [
         page_num
         for page_num in range(1, total_pages + 1)
         if page_num not in all_pages or not (all_pages.get(page_num) or "").strip()
     ]
+
+
+def _ocr_candidate_pages(all_pages: Dict[int, str], total_pages: int) -> List[int]:
+    """Pages that need Gemini OCR — truly empty or below minimum text threshold."""
+    return [
+        page_num
+        for page_num in range(1, total_pages + 1)
+        if page_num not in all_pages
+        or len((all_pages.get(page_num) or "").strip()) < MIN_TEXT_LENGTH
+    ]
+
+
+def _truncate_dense_pages(all_pages: Dict[int, str]) -> None:
+    """Cap per-page text before chunking to keep embedding batches efficient."""
+    for page_num, content in list(all_pages.items()):
+        if len(content) > MAX_CHARS_PER_PAGE:
+            all_pages[page_num] = content[:MAX_CHARS_PER_PAGE]
+            logger.info(
+                "Page %s truncated to %s chars in %s",
+                page_num,
+                MAX_CHARS_PER_PAGE,
+                "pdf",
+            )
 
 
 def _gemini_ocr_page(file_path: str, page_num: int) -> str:
@@ -197,17 +228,67 @@ def _gemini_ocr_page(file_path: str, page_num: int) -> str:
         return ""
 
 
-def _extract_pdf_deep(file_path: str, filename: str) -> str:
+def _extract_pymupdf_pages_parallel(
+    file_path: str, page_nums: List[int]
+) -> Dict[int, str]:
+    """Extract missing pages via PyMuPDF using a small thread pool."""
+    if not page_nums:
+        return {}
+
+    try:
+        import fitz
+    except Exception as exc:
+        logger.warning("PyMuPDF unavailable: %s", exc)
+        return {}
+
+    results: Dict[int, str] = {}
+    try:
+        doc = fitz.open(file_path)
+
+        def extract_page_fitz(page_num: int) -> tuple[int, str]:
+            try:
+                text = doc[page_num - 1].get_text("text").strip()
+                return page_num, text
+            except Exception as exc:
+                logger.warning("PyMuPDF page %s failed: %s", page_num, exc)
+                return page_num, ""
+
+        with ThreadPoolExecutor(max_workers=PYMUPDF_MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(extract_page_fitz, page_num): page_num
+                for page_num in page_nums
+            }
+            for future in as_completed(futures):
+                page_num, text = future.result()
+                if text:
+                    results[page_num] = text
+
+        doc.close()
+    except Exception as exc:
+        logger.warning("PyMuPDF failed: %s", exc)
+
+    return results
+
+
+def _extract_pdf_deep(
+    file_path: str,
+    filename: str,
+    on_progress: Optional[ProgressCallback] = None,
+) -> str:
     """
     Deep extraction — reads every page with up to four strategies per missing page.
+    Gemini OCR is capped and only used for genuinely empty/scanned pages.
     """
     total_pages = _get_pdf_page_count(file_path)
     if total_pages == 0:
         raise ValueError(f"Could not determine page count for '{filename}'")
 
+    if on_progress:
+        on_progress(f"Reading {total_pages} pages…")
+
     all_pages: Dict[int, str] = {}
 
-    # Strategy 1 — pdfplumber (text + tables)
+    # Strategy 1 — pdfplumber (text + tables, all pages in one pass)
     try:
         import pdfplumber
 
@@ -224,17 +305,11 @@ def _extract_pdf_deep(file_path: str, filename: str) -> str:
     except Exception as exc:
         logger.warning("pdfplumber failed for %s: %s", filename, exc)
 
-    # Strategy 2 — PyMuPDF for pages pdfplumber missed
-    for page_num in _missing_pages(all_pages, total_pages):
-        try:
-            import fitz
-
-            with fitz.open(file_path) as doc:
-                text = doc[page_num - 1].get_text("text").strip()
-                if text:
-                    all_pages[page_num] = text
-        except Exception as exc:
-            logger.warning("PyMuPDF page %s failed: %s", page_num, exc)
+    # Strategy 2 — PyMuPDF in parallel for pages pdfplumber missed
+    missing = _missing_pages(all_pages, total_pages)
+    if missing:
+        for page_num, text in _extract_pymupdf_pages_parallel(file_path, missing).items():
+            all_pages[page_num] = text
 
     # Strategy 3 — PyPDF2 for remaining pages
     still_missing = _missing_pages(all_pages, total_pages)
@@ -254,11 +329,27 @@ def _extract_pdf_deep(file_path: str, filename: str) -> str:
         except Exception as exc:
             logger.warning("PyPDF2 failed for %s: %s", filename, exc)
 
-    # Strategy 4 — Gemini OCR per remaining page
-    for page_num in _missing_pages(all_pages, total_pages):
-        text = _gemini_ocr_page(file_path, page_num)
-        if text:
-            all_pages[page_num] = text
+    # Strategy 4 — Gemini OCR only for truly empty pages (hard cap)
+    ocr_candidates = _ocr_candidate_pages(all_pages, total_pages)
+    if ocr_candidates:
+        if len(ocr_candidates) > MAX_OCR_PAGES:
+            logger.warning(
+                "%s pages need OCR in %s but capping at %s. "
+                "Document may be a scanned image PDF.",
+                len(ocr_candidates),
+                filename,
+                MAX_OCR_PAGES,
+            )
+        if on_progress:
+            ocr_count = min(len(ocr_candidates), MAX_OCR_PAGES)
+            on_progress(f"OCR on {ocr_count} scanned page(s)…")
+
+        for page_num in ocr_candidates[:MAX_OCR_PAGES]:
+            text = _gemini_ocr_page(file_path, page_num)
+            if text:
+                all_pages[page_num] = text
+
+    _truncate_dense_pages(all_pages)
 
     output: List[str] = []
     for page_num in sorted(all_pages.keys()):
@@ -304,7 +395,11 @@ def _extract_non_pdf(file_path: str, filename: str) -> str:
     return f"[PAGE 1]\n{body}"
 
 
-def extract_text_with_pages(file_path: str, filename: str) -> str:
+def extract_text_with_pages(
+    file_path: str,
+    filename: str,
+    on_progress: Optional[ProgressCallback] = None,
+) -> str:
     """
     Extract text preserving page numbers.
     PDFs use deep multi-strategy per-page extraction; other formats use [PAGE 1].
@@ -320,12 +415,16 @@ def extract_text_with_pages(file_path: str, filename: str) -> str:
 
     try:
         if ext == ".pdf":
-            return _extract_pdf_deep(file_path, filename)
+            return _extract_pdf_deep(file_path, filename, on_progress=on_progress)
         return _extract_non_pdf(file_path, filename)
     except Exception as exc:
         raise ValueError(f"Error parsing file '{filename}': {exc}") from exc
 
 
-def extract_text(file_path: str, filename: str) -> str:
+def extract_text(
+    file_path: str,
+    filename: str,
+    on_progress: Optional[ProgressCallback] = None,
+) -> str:
     """Extract plain text with page markers for RAG indexing."""
-    return extract_text_with_pages(file_path, filename)
+    return extract_text_with_pages(file_path, filename, on_progress=on_progress)

@@ -45,6 +45,7 @@ def apply_startup_migrations() -> None:
     _migrate_message_source_links_columns()
     _migrate_uploaded_file_vector_columns()
     _migrate_uploaded_file_processing_error()
+    _migrate_uploaded_file_status_detail()
     _migrate_embeddings_page_column()
     _migrate_gemini_usage_index()
 
@@ -144,6 +145,22 @@ def _migrate_uploaded_file_processing_error() -> None:
             [
                 "ALTER TABLE uploaded_files "
                 "ADD COLUMN IF NOT EXISTS processing_error TEXT"
+            ]
+        )
+
+
+def _migrate_uploaded_file_status_detail() -> None:
+    existing = _column_names("uploaded_files")
+    if not existing or "status_detail" in existing:
+        return
+
+    if _is_sqlite():
+        _run_alters(["ALTER TABLE uploaded_files ADD COLUMN status_detail TEXT"])
+    else:
+        _run_alters(
+            [
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS status_detail TEXT"
             ]
         )
 
