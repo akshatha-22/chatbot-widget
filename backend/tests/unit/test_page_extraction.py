@@ -45,6 +45,7 @@ def test_pdf_extracts_three_page_markers(tmp_path):
         ("p.11", 11),
         ("pg 5", 5),
         ("on page number 7", 7),
+        ("what's on page 115", 115),
         ("tell me about bearings", None),
     ],
 )

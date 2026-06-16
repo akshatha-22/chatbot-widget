@@ -247,13 +247,23 @@ def _extract_page_number(query: str) -> int | None:
         r"page\s*[\.\#]?\s*(\d+)",
         r"p\.\s*(\d+)",
         r"pg\s*\.?\s*(\d+)",
+        r"(\d+)\s*(?:st|nd|rd|th)?\s*page",
+        r"what(?:'s| is| are)?\s+(?:on|in)\s+page\s+(\d+)",
+        r"show\s+me\s+page\s+(\d+)",
     ]
     lowered = query.lower()
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
-            return int(match.group(1))
+            page_num = int(match.group(1))
+            if 1 <= page_num <= 10000:
+                return page_num
     return None
+
+
+def detect_page_query(message: str) -> int | None:
+    """Public alias for page-number detection in user messages."""
+    return _extract_page_number(message)
 
 
 def _resolve_index_chunks(
@@ -638,6 +648,39 @@ def _search_by_page(
     except Exception as exc:
         logger.error("_search_by_page failed: %s", exc)
         return []
+
+
+def get_page_content(
+    db: Session,
+    file_ids: List[str],
+    page_num: int,
+    top_k: int = PAGE_QUERY_TOP_K,
+) -> str:
+    """Return combined chunk text for a specific page, or empty string if missing."""
+    chunks = _search_by_page(db, file_ids, page_num, top_k=top_k)
+    if not chunks:
+        return ""
+    return "\n\n".join(chunks)
+
+
+def get_max_page_number(db: Session, file_ids: List[str]) -> int:
+    """Highest page number indexed for the given files."""
+    if not file_ids:
+        return 0
+    try:
+        result = db.execute(
+            text(
+                """
+                SELECT MAX(page) FROM embeddings
+                WHERE file_id IN :file_ids
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {"file_ids": file_ids},
+        ).scalar()
+        return int(result or 0)
+    except Exception as exc:
+        logger.warning("get_max_page_number failed: %s", exc)
+        return 0
 
 
 def _exact_string_search(
