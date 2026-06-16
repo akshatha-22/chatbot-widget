@@ -15,12 +15,24 @@ MARKDOWN_INSTRUCTION = (
     "**bold** for key terms, and blank lines between paragraphs."
 )
 
-DOCUMENT_ACCESS_INSTRUCTION = """
-IMPORTANT: You DO have access to this document.
-Never say "I cannot access your document."
-Never say "I don't have access to uploaded files."
-The content above IS the document content.
-If the user asks about a specific page, the page number is shown in [Page X] markers.
+DOCUMENT_ACCESS_OVERRIDE = """
+SYSTEM OVERRIDE — READ THIS FIRST:
+You are operating with direct access to document content that has been extracted
+and provided to you below. This is NOT your training data.
+This is NOT web search results.
+This IS real content extracted from the user's actual uploaded document.
+
+ABSOLUTE RULES:
+1. NEVER say "I cannot access your document"
+2. NEVER say "I don't have access to uploaded files"
+3. NEVER say "I cannot read page by page"
+4. NEVER say "my responses are based on training data" when document content is below
+5. ALWAYS treat the DOCUMENT CONTENT section below as the actual contents of the user's file
+6. If the user asks about a specific page, look for [Page X] markers and answer from that section
+7. If the content below does not contain what the user asked for, say:
+   "I found your document but this specific information wasn't in the retrieved sections.
+   Try asking differently or specifying a page number."
+   Then search the web for supplementary information if appropriate.
 """
 
 NOT_FOUND_MESSAGE = (
@@ -359,7 +371,7 @@ def _has_pending_files(db: Session, conversation_id: int) -> bool:
         db.query(UploadedFile)
         .filter(
             UploadedFile.conversation_id == conversation_id,
-            UploadedFile.status == "pending",
+            UploadedFile.status.in_(("pending", "extracting", "embedding")),
         )
         .count()
         > 0
@@ -399,66 +411,55 @@ def _build_prompt_and_search_flag(
 
         if quality == RAGQuality.DIRECT:
             return (
-                f"""You are Remi, a helpful assistant with access to the user's uploaded document.
-
-The following content was extracted directly from the user's uploaded document.
-It is real document content — not web data, not your training data.
-
-Answer the user's question using ONLY the content below.
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
 
 {MARKDOWN_INSTRUCTION}
 
-DOCUMENT CONTENT:
+DOCUMENT CONTENT (extracted from user's file):
+═══════════════════════════════════════════════
 {rag_context}
+═══════════════════════════════════════════════
 
-Question: {query}
+User question: {query}
 
-{DOCUMENT_ACCESS_INSTRUCTION}""",
+Answer using ONLY the document content above.
+Quote specific details. Reference page numbers using [Page X] markers when relevant.""",
                 False,
                 "document",
             )
 
         if quality == RAGQuality.PARTIAL:
             return (
-                f"""You are Remi, a helpful assistant with access to the user's uploaded document.
-
-The following content was extracted from the user's uploaded document.
-It may be incomplete for this question. Do the following:
-
-1. First share what the document says — label it "From your document:"
-2. Then search the web and add what you find — label it "From the web:"
-3. Combine both into one complete answer.
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
 
 {MARKDOWN_INSTRUCTION}
 
-DOCUMENT CONTENT:
+DOCUMENT CONTENT (extracted from user's file):
+═══════════════════════════════════════════════
 {rag_context}
+═══════════════════════════════════════════════
 
-Question: {query}
+The document has partial information.
+First answer from the document content above, labeled "From your document:".
+Then supplement with web search results, labeled "From the web:".
 
-{DOCUMENT_ACCESS_INSTRUCTION}""",
+User question: {query}""",
                 True,
                 "both",
             )
 
         if quality == RAGQuality.DEFLECTED:
             return (
-                f"""You are Remi, a helpful assistant.
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
 
-The uploaded document does not contain a useful answer
-to this question — it only contains disclaimers or
-referrals to contact staff.
-
-IMPORTANT:
-- Do NOT repeat any disclaimers from the document
-- Do NOT tell the user to contact anyone
-- Search the web and provide a direct, useful answer
-- Begin with: "Your document doesn't cover this
-  specifically — here's what I found online:"
+NOTE: The document contains disclaimers instead of direct answers.
+Do NOT repeat these disclaimers.
+Search the web and provide a direct, useful answer.
+Begin with: "Your document doesn't cover this specifically — here's what I found online:"
 
 {MARKDOWN_INSTRUCTION}
 
-Question: {query}""",
+User question: {query}""",
                 True,
                 "web",
             )
@@ -1078,8 +1079,18 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
             print(f"[RAG] No processed files for {conversation_id}")
             return ""
 
-        file_ids = [f.id for f in files]
-        print(f"[RAG] Searching {len(file_ids)} files")
+        searchable = [
+            f for f in files if vector_store_service.file_has_searchable_embeddings(db, f.id)
+        ]
+        if not searchable:
+            print(
+                f"[RAG] {len(files)} processed file(s) but none have searchable embeddings "
+                "(re-upload or re-index required)"
+            )
+            return ""
+
+        file_ids = [f.id for f in searchable]
+        print(f"[RAG] Searching {len(file_ids)} files with embeddings")
 
         top_k = (
             vector_store_service.PAGE_QUERY_TOP_K
@@ -1088,9 +1099,10 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
         )
         chunks = vector_store_service.search(file_ids, user_message, top_k=top_k, db=db)
         if not chunks:
-            print("[RAG] No chunks returned from search")
+            print(f"[RAG] No chunks returned from search for query: {user_message!r}")
             return ""
 
+        print(f"[RAG] Retrieved {len(chunks)} chunks ({sum(len(c) for c in chunks)} chars)")
         return "\n\n".join(chunks)
     except Exception as e:
         print(f"[RAG] Error building context: {e}")

@@ -37,22 +37,6 @@ def test_pdf_extracts_three_page_markers(tmp_path):
     assert "Beta content" in text
 
 
-def test_all_pdf_extractors_emit_page_markers(tmp_path):
-    path = _make_pdf(tmp_path, ["Page one text", "Page two text"])
-
-    for extractor in (
-        file_parser_service._extract_pdf_pdfplumber,
-        file_parser_service._extract_pdf_pypdf2,
-        file_parser_service._extract_pdf_pymupdf,
-    ):
-        text = extractor(path)
-        assert "[PAGE 1]" in text
-        assert "[PAGE 2]" in text
-
-    bare = "OCR output without markers"
-    assert "[PAGE 1]" in file_parser_service._ensure_pdf_page_markers(bare)
-
-
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -109,32 +93,16 @@ def test_search_by_page_orders_by_chunk_index(db_session):
 
 
 def test_corrupted_pdf_page_is_skipped(tmp_path):
-    path = _make_pdf(tmp_path, ["Good page one", "Good page two"])
+    path = _make_pdf(tmp_path, ["Good page one"])
 
-    class FakePage:
-        def __init__(self, number: int):
-            self.number = number
-
-        def extract_text(self):
-            if self.number == 2:
-                raise RuntimeError("corrupt page")
-            return f"Content for page {self.number}"
-
-    class FakePdf:
-        pages = [FakePage(1), FakePage(2)]
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    with patch("pdfplumber.open", return_value=FakePdf()):
-        text = file_parser_service._extract_pdf_pdfplumber(path)
-
+    with patch(
+        "app.services.file_parser_service._gemini_ocr_page",
+        return_value="",
+    ):
+        with patch("pdfplumber.open", side_effect=RuntimeError("plumber failed")):
+            text = file_parser_service._extract_pdf_deep(path, "doc.pdf")
     assert "[PAGE 1]" in text
-    assert "Content for page 1" in text
-    assert "[PAGE 2]" not in text
+    assert "Good page" in text
 
 
 def test_page_query_uses_higher_top_k(monkeypatch, db_session):

@@ -23,6 +23,7 @@ import {
   removeConversationFromFolders,
 } from '../../utils/conversationFoldersStorage'
 import type { Conversation, Message, UploadedFile, User } from '../../types'
+import { FILE_IN_PROGRESS_STATUSES } from '../../types'
 
 const ChatbotWidget = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -143,7 +144,9 @@ const ChatbotWidget = () => {
   // Poll while any file is still indexing (background embedding on server).
   useEffect(() => {
     if (!activeConversation || !user) return
-    const hasPending = files.some((f) => f.status === 'pending')
+    const hasPending = files.some((f) =>
+      FILE_IN_PROGRESS_STATUSES.includes(f.status),
+    )
     if (!hasPending) return
 
     const conversationId = activeConversation.id
@@ -151,7 +154,9 @@ const ChatbotWidget = () => {
       try {
         const updated = await listFiles(conversationId)
         setFiles(updated)
-        const stillPending = updated.some((f) => f.status === 'pending')
+        const stillPending = updated.some((f) =>
+          FILE_IN_PROGRESS_STATUSES.includes(f.status),
+        )
         if (!stillPending) {
           clearInterval(interval)
         }
