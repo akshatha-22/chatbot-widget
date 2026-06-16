@@ -9,6 +9,7 @@ type MobileFilesPanelProps = {
   files: UploadedFile[]
   onAddMore: () => void
   onDeleteFile: (fileId: string) => Promise<void>
+  onReindexFile?: (fileId: string) => Promise<void>
 }
 
 export default function MobileFilesPanel({
@@ -17,6 +18,7 @@ export default function MobileFilesPanel({
   files,
   onAddMore,
   onDeleteFile,
+  onReindexFile,
 }: MobileFilesPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAFAFA] touch-scroll">
@@ -50,7 +52,12 @@ export default function MobileFilesPanel({
         ) : (
           <div className="mx-3 space-y-2">
             {files.map((f) => (
-              <FileListItem key={f.id} file={f} onDelete={onDeleteFile} />
+              <FileListItem
+                key={f.id}
+                file={f}
+                onDelete={onDeleteFile}
+                onReindex={onReindexFile}
+              />
             ))}
           </div>
         )}

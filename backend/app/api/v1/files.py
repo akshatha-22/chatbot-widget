@@ -25,6 +25,26 @@ MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "uploads"))
 
 
+def _file_is_stale(db_file: UploadedFile) -> bool:
+    if db_file.status != "processed":
+        return False
+    current = vector_store_service.get_current_embedding_model_version()
+    return db_file.embedding_model_version != current
+
+
+def _build_file_response(db_file: UploadedFile) -> FileResponse:
+    return FileResponse(
+        id=db_file.id,
+        filename=db_file.filename,
+        status=db_file.status,
+        conversation_id=db_file.conversation_id,
+        created_at=db_file.created_at,
+        processing_error=db_file.processing_error,
+        embedding_model_version=db_file.embedding_model_version,
+        stale=_file_is_stale(db_file),
+    )
+
+
 def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
     """Parse, chunk, and index a file in the background (separate DB session)."""
     print(f"[EMBED] Starting embedding for {filename} ({file_id})")
@@ -180,7 +200,7 @@ async def upload_file(
         get_real_ip(request),
     )
 
-    return db_file
+    return _build_file_response(db_file)
 
 
 @router.get("/{conversation_id}/files", response_model=List[FileResponse])
@@ -194,11 +214,68 @@ def list_uploaded_files(
 
     get_conversation(db, conversation_id, current_user.id)
 
-    return (
+    rows = (
         db.query(UploadedFile)
         .filter(UploadedFile.conversation_id == conversation_id)
         .all()
     )
+    return [_build_file_response(row) for row in rows]
+
+
+@router.post(
+    "/{conversation_id}/files/{file_id}/reindex",
+    response_model=FileResponse,
+)
+async def reindex_uploaded_file(
+    conversation_id: int,
+    file_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(auth_service.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Re-embed an existing upload (e.g. after index version upgrade)."""
+    from app.services.chat_service import require_conversation_access
+
+    require_conversation_access(db, conversation_id, current_user.id)
+
+    db_file = (
+        db.query(UploadedFile)
+        .filter(
+            UploadedFile.id == file_id,
+            UploadedFile.conversation_id == conversation_id,
+        )
+        .first()
+    )
+    if not db_file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+    if not os.path.isfile(db_file.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Uploaded file missing on server — please upload again",
+        )
+    if db_file.status == "pending":
+        return _build_file_response(db_file)
+
+    db_file.status = "pending"
+    db_file.processing_error = None
+    db.commit()
+    db.refresh(db_file)
+
+    if os.getenv("INLINE_FILE_PROCESSING") == "1":
+        process_file_embedding(db_file.id, db_file.file_path, db_file.filename)
+        db.refresh(db_file)
+    else:
+        background_tasks.add_task(
+            _run_embedding_in_thread,
+            db_file.id,
+            db_file.file_path,
+            db_file.filename,
+        )
+
+    return _build_file_response(db_file)
 
 
 @router.delete(

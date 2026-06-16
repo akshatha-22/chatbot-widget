@@ -16,3 +16,5 @@ class FileResponse(FileBase):
     conversation_id: int
     created_at: datetime
     processing_error: Optional[str] = None
+    embedding_model_version: Optional[str] = None
+    stale: bool = False

@@ -12,7 +12,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { streamSendMessage } from './streamSend'
-import { deleteFile, listFiles, uploadFile } from '../../api/files'
+import { deleteFile, listFiles, reindexFile, uploadFile } from '../../api/files'
 import ChatInterface from './ChatInterface'
 import WidgetConversationDashboard from './WidgetConversationDashboard'
 import RemiAvatar2D from './RemiAvatar2D'
@@ -168,6 +168,22 @@ export default function ExpandedWidget({
       }
     },
     [conversation, files, onFilesChange],
+  )
+
+  const handleReindexFile = useCallback(
+    async (fileId: string) => {
+      if (!conversation) return
+      try {
+        const updated = await reindexFile(conversation.id, fileId)
+        onFilesChange((prev) => prev.map((f) => (f.id === fileId ? updated : f)))
+        flashFileToast('Re-indexing started', 'success')
+        const refreshed = await listFiles(conversation.id)
+        onFilesChange(refreshed)
+      } catch {
+        flashFileToast('Could not re-index file', 'error')
+      }
+    },
+    [conversation, onFilesChange],
   )
 
   const handleSend = async () => {
@@ -396,6 +412,7 @@ export default function ExpandedWidget({
                 key={f.id}
                 file={f}
                 onDelete={handleDeleteFile}
+                onReindex={handleReindexFile}
                 compact
               />
             ))}
@@ -601,6 +618,7 @@ export default function ExpandedWidget({
                     files={files}
                     onAddMore={handleOpenFileUploadModal}
                     onDeleteFile={handleDeleteFile}
+                    onReindexFile={handleReindexFile}
                   />
                 </aside>
               )}
