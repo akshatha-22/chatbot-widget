@@ -13,6 +13,17 @@ const FILE_TYPE_COLORS: Record<string, string> = {
   md: '#8C8C8C',
 }
 
+const STATUS_CONFIG: Record<
+  UploadedFile['status'],
+  { label: string; color: string; pulse: boolean }
+> = {
+  pending: { label: 'Uploading…', color: '#888888', pulse: true },
+  extracting: { label: 'Reading pages…', color: '#2979FF', pulse: true },
+  embedding: { label: 'Indexing content…', color: '#2979FF', pulse: true },
+  processed: { label: 'Ready', color: '#22C55E', pulse: false },
+  failed: { label: 'Failed — try re-uploading', color: '#EF4444', pulse: false },
+}
+
 function fileIconColor(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
   return FILE_TYPE_COLORS[ext] ?? '#8C8C8C'
@@ -35,8 +46,10 @@ export default function FileListItem({
   const [deleting, setDeleting] = useState(false)
   const [reindexing, setReindexing] = useState(false)
 
+  const status = STATUS_CONFIG[file.status] ?? STATUS_CONFIG.pending
   const processed = file.status === 'processed'
   const failed = file.status === 'failed'
+  const inProgress = status.pulse
   const stale = processed && Boolean(file.stale)
   const failureDetail = file.processing_error?.trim()
 
@@ -82,11 +95,12 @@ export default function FileListItem({
         {processed ? (
           <div>
             <p
-              className={`flex items-center gap-1 text-[#22C55E] ${
+              className={`flex items-center gap-1 ${
                 compact ? 'text-[11px]' : 'text-xs'
               }`}
+              style={{ color: status.color }}
             >
-              <Check size={compact ? 11 : 14} /> Ready
+              <Check size={compact ? 11 : 14} /> {status.label}
             </p>
             {stale && (
               <div className={`mt-1 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
@@ -107,11 +121,12 @@ export default function FileListItem({
         ) : failed ? (
           <div>
             <p
-              className={`flex items-center gap-1 text-red-500 ${
+              className={`flex items-center gap-1 ${
                 compact ? 'text-[11px]' : 'text-xs'
               }`}
+              style={{ color: status.color }}
             >
-              <X size={compact ? 11 : 14} aria-hidden /> Processing failed
+              <X size={compact ? 11 : 14} aria-hidden /> {status.label}
             </p>
             {failureDetail && (
               <p className={`mt-0.5 text-red-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
@@ -121,15 +136,18 @@ export default function FileListItem({
           </div>
         ) : (
           <p
-            className={`flex items-center gap-1 text-blue-500 ${
+            className={`flex items-center gap-1 ${
               compact ? 'text-[11px]' : 'text-xs'
             }`}
+            style={{ color: status.color }}
           >
-            <span
-              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"
-              aria-hidden
-            />
-            Processing…
+            {inProgress && (
+              <span
+                className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                aria-hidden
+              />
+            )}
+            {status.label}
           </p>
         )}
         {confirming && (

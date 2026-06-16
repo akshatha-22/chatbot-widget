@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -114,167 +114,200 @@ def _ensure_pdf_page_markers(text: str) -> str:
     return f"[PAGE 1]\n{cleaned}"
 
 
-def _extract_pdf_pdfplumber(file_path: str) -> str:
-    """Extract PDF text page-by-page with [PAGE N] markers."""
-    import pdfplumber
+def _get_pdf_page_count(file_path: str) -> int:
+    try:
+        import pdfplumber
 
-    pages: List[str] = []
-    with pdfplumber.open(file_path) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
+        with pdfplumber.open(file_path) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        try:
+            import fitz
+
+            with fitz.open(file_path) as doc:
+                return len(doc)
+        except Exception:
             try:
-                page_text = page.extract_text() or ""
-                if page_text.strip():
-                    pages.append(f"[PAGE {i}]\n{page_text.strip()}")
-            except Exception as exc:
-                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
-    return "\n\n".join(pages)
+                import PyPDF2
+
+                with open(file_path, "rb") as handle:
+                    return len(PyPDF2.PdfReader(handle).pages)
+            except Exception:
+                return 0
 
 
-def _extract_pdf_pypdf2(file_path: str) -> str:
-    import PyPDF2
-
-    pages: List[str] = []
-    with open(file_path, "rb") as handle:
-        reader = PyPDF2.PdfReader(handle)
-        for i, page in enumerate(reader.pages, start=1):
-            try:
-                page_text = page.extract_text() or ""
-                if page_text.strip():
-                    pages.append(f"[PAGE {i}]\n{page_text.strip()}")
-            except Exception as exc:
-                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
-    return "\n\n".join(pages)
+def _format_tables(tables: list) -> str:
+    """Convert pdfplumber table arrays to readable pipe-delimited text."""
+    output: List[str] = []
+    for table in tables:
+        for row in table:
+            cleaned = [str(cell).strip() if cell else "" for cell in row]
+            if any(cleaned):
+                output.append(" | ".join(cleaned))
+    return "\n".join(output)
 
 
-def _extract_pdf_pymupdf(file_path: str) -> str:
-    import fitz
-
-    pages: List[str] = []
-    with fitz.open(file_path) as doc:
-        for i, page in enumerate(doc, start=1):
-            try:
-                text = page.get_text("text")
-                if text and text.strip():
-                    pages.append(f"[PAGE {i}]\n{text.strip()}")
-            except Exception as exc:
-                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
-    return "\n\n".join(pages)
+def _missing_pages(all_pages: Dict[int, str], total_pages: int) -> List[int]:
+    return [
+        page_num
+        for page_num in range(1, total_pages + 1)
+        if page_num not in all_pages or not (all_pages.get(page_num) or "").strip()
+    ]
 
 
-def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
-    """OCR fallback for image-only PDFs (e.g. flipbook catalogues) via Gemini."""
-    import time
-
+def _gemini_ocr_page(file_path: str, page_num: int) -> str:
+    """Use Gemini vision to OCR a single scanned page (last resort)."""
     from app.config import settings
 
     if not settings.gemini_configured():
         return ""
 
-    file_size = os.path.getsize(file_path)
-    if file_size > MAX_PDF_OCR_BYTES:
-        raise ValueError(
-            f"{filename} exceeds the {MAX_PDF_OCR_BYTES // (1024 * 1024)}MB OCR limit."
+    try:
+        import fitz
+        from google import genai
+        from google.genai import types
+
+        with fitz.open(file_path) as doc:
+            page = doc[page_num - 1]
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+
+        client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
+        model = settings.GEMINI_MODEL.removeprefix("models/")
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                        types.Part.from_text(
+                            text=(
+                                "Extract all text from this page exactly as it appears. "
+                                "Return only the text, no commentary."
+                            )
+                        ),
+                    ],
+                )
+            ],
+        )
+        return (getattr(response, "text", None) or "").strip()
+    except Exception as exc:
+        logger.warning("Gemini OCR page %s failed: %s", page_num, exc)
+        return ""
+
+
+def _extract_pdf_deep(file_path: str, filename: str) -> str:
+    """
+    Deep extraction — reads every page with up to four strategies per missing page.
+    """
+    total_pages = _get_pdf_page_count(file_path)
+    if total_pages == 0:
+        raise ValueError(f"Could not determine page count for '{filename}'")
+
+    all_pages: Dict[int, str] = {}
+
+    # Strategy 1 — pdfplumber (text + tables)
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(file_path) as pdf:
+            for i, page in enumerate(pdf.pages, start=1):
+                try:
+                    page_text = page.extract_text() or ""
+                    table_text = _format_tables(page.extract_tables() or [])
+                    combined = f"{page_text}\n{table_text}".strip()
+                    if combined:
+                        all_pages[i] = combined
+                except Exception as exc:
+                    logger.warning("pdfplumber page %s failed: %s", i, exc)
+    except Exception as exc:
+        logger.warning("pdfplumber failed for %s: %s", filename, exc)
+
+    # Strategy 2 — PyMuPDF for pages pdfplumber missed
+    for page_num in _missing_pages(all_pages, total_pages):
+        try:
+            import fitz
+
+            with fitz.open(file_path) as doc:
+                text = doc[page_num - 1].get_text("text").strip()
+                if text:
+                    all_pages[page_num] = text
+        except Exception as exc:
+            logger.warning("PyMuPDF page %s failed: %s", page_num, exc)
+
+    # Strategy 3 — PyPDF2 for remaining pages
+    still_missing = _missing_pages(all_pages, total_pages)
+    if still_missing:
+        try:
+            import PyPDF2
+
+            with open(file_path, "rb") as handle:
+                reader = PyPDF2.PdfReader(handle)
+                for page_num in still_missing:
+                    try:
+                        text = (reader.pages[page_num - 1].extract_text() or "").strip()
+                        if text:
+                            all_pages[page_num] = text
+                    except Exception as exc:
+                        logger.warning("PyPDF2 page %s failed: %s", page_num, exc)
+        except Exception as exc:
+            logger.warning("PyPDF2 failed for %s: %s", filename, exc)
+
+    # Strategy 4 — Gemini OCR per remaining page
+    for page_num in _missing_pages(all_pages, total_pages):
+        text = _gemini_ocr_page(file_path, page_num)
+        if text:
+            all_pages[page_num] = text
+
+    output: List[str] = []
+    for page_num in sorted(all_pages.keys()):
+        content = all_pages[page_num].strip()
+        if content:
+            output.append(f"[PAGE {page_num}]\n{content}")
+
+    unreadable = _missing_pages(all_pages, total_pages)
+    if unreadable:
+        logger.warning(
+            "Unreadable pages after all strategies in %s: %s",
+            filename,
+            unreadable,
         )
 
-    from google import genai
-    from google.genai import types
+    if not output:
+        raise ValueError(
+            f"No readable text found in '{filename}'. "
+            "This PDF may be blank or image-only."
+        )
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
-    model = settings.GEMINI_MODEL.removeprefix("models/")
-    prompt = (
-        "Extract all readable text from this PDF document. "
-        "Prefix each page with [PAGE N] on its own line before that page's text "
-        "(N is the page number starting at 1). "
-        "Include product names, part numbers, descriptions, and tables. "
-        "Return plain text only — no markdown code fences."
+    logger.info(
+        "Deep PDF extraction for %s: %s/%s pages with text",
+        filename,
+        len(output),
+        total_pages,
     )
-
-    uploaded = None
-    try:
-        if file_size >= PDF_FILE_API_THRESHOLD_BYTES:
-            uploaded = client.files.upload(file=file_path)
-            for _ in range(90):
-                uploaded = client.files.get(name=uploaded.name)
-                state = getattr(uploaded, "state", None)
-                state_name = getattr(state, "name", str(state))
-                if state_name == "ACTIVE":
-                    break
-                if state_name == "FAILED":
-                    raise ValueError("Gemini could not process this PDF for text extraction")
-                time.sleep(2)
-            else:
-                raise ValueError("Timed out waiting for PDF text extraction")
-
-            response = client.models.generate_content(
-                model=model,
-                contents=[uploaded, prompt],
-            )
-        else:
-            with open(file_path, "rb") as handle:
-                pdf_bytes = handle.read()
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_bytes(
-                                data=pdf_bytes, mime_type="application/pdf"
-                            ),
-                            types.Part.from_text(text=prompt),
-                        ],
-                    )
-                ],
-            )
-    finally:
-        if uploaded is not None:
-            try:
-                client.files.delete(name=uploaded.name)
-            except Exception:
-                pass
-
-    text = (getattr(response, "text", None) or "").strip()
-    text = _ensure_pdf_page_markers(text)
-    if text:
-        logger.info("Gemini OCR extracted %s characters from %s", len(text), filename)
-    return text
+    return "\n\n".join(output)
 
 
-def _extract_pdf_text(file_path: str, filename: str) -> str:
-    """Try pdfplumber, PyPDF2, PyMuPDF, then Gemini OCR for image-only PDFs."""
-    extractors = (
-        ("pdfplumber", _extract_pdf_pdfplumber),
-        ("PyPDF2", _extract_pdf_pypdf2),
-        ("PyMuPDF", _extract_pdf_pymupdf),
-    )
-    for name, extractor in extractors:
-        try:
-            text = extractor(file_path).strip()
-            if text:
-                text = _ensure_pdf_page_markers(text)
-                logger.info("PDF text via %s: %s chars from %s", name, len(text), filename)
-                return text
-        except Exception as exc:
-            logger.warning("%s extraction failed for %s: %s", name, filename, exc)
+def _extract_non_pdf(file_path: str, filename: str) -> str:
+    ext = Path(file_path).suffix.lower() or os.path.splitext(filename.lower())[1]
 
-    try:
-        text = _extract_pdf_gemini_ocr(file_path, filename).strip()
-        if text:
-            return _ensure_pdf_page_markers(text)
-    except Exception as exc:
-        logger.error("Gemini OCR failed for %s: %s", filename, exc)
-        raise ValueError(f"Could not read text from PDF '{filename}': {exc}") from exc
+    if ext == ".docx":
+        import docx
 
-    raise ValueError(
-        f"No readable text found in '{filename}'. "
-        "This PDF may be blank or image-only; try exporting a text-based PDF."
-    )
+        doc = docx.Document(file_path)
+        paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+        return f"[PAGE 1]\n" + "\n".join(paragraphs)
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
+        body = handle.read()
+    return f"[PAGE 1]\n{body}"
 
 
 def extract_text_with_pages(file_path: str, filename: str) -> str:
     """
     Extract text preserving page numbers.
-    Each page is prefixed with [PAGE X]. Non-PDF formats use [PAGE 1].
+    PDFs use deep multi-strategy per-page extraction; other formats use [PAGE 1].
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found at path: {file_path}")
@@ -287,20 +320,8 @@ def extract_text_with_pages(file_path: str, filename: str) -> str:
 
     try:
         if ext == ".pdf":
-            return _extract_pdf_text(file_path, filename)
-
-        if ext == ".docx":
-            import docx
-
-            doc = docx.Document(file_path)
-            paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
-            body = "\n".join(paragraphs)
-            return f"[PAGE 1]\n{body}"
-
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            body = handle.read()
-        return f"[PAGE 1]\n{body}"
-
+            return _extract_pdf_deep(file_path, filename)
+        return _extract_non_pdf(file_path, filename)
     except Exception as exc:
         raise ValueError(f"Error parsing file '{filename}': {exc}") from exc
 

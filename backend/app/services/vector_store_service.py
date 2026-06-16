@@ -179,8 +179,8 @@ def _is_postgres(db: Session) -> bool:
 
 def split_text(
     text: str,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
 ) -> List[str]:
     """Split text into overlapping chunks."""
     if not text or not text.strip():
@@ -202,8 +202,8 @@ def split_text(
 
 def split_text_with_pages(
     text: str,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
 ) -> List[dict]:
     """
     Split page-aware text into chunks.
@@ -412,8 +412,8 @@ def chunk_and_store(
     file_id: str,
     source_text: str,
     db: Optional[Session] = None,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
     *,
     chunks: Optional[List[str]] = None,
     raw_text: Optional[str] = None,
@@ -508,6 +508,22 @@ def chunk_and_store(
         logger.error("chunk_and_store failed for %s: %s", file_id, exc)
         db.rollback()
         raise ValueError(f"Could not save embeddings to database: {exc}") from exc
+
+
+def file_has_searchable_embeddings(db: Session, file_id: str) -> bool:
+    """True when a file is processed with current-version pgvector rows."""
+    from app.database.db import UploadedFile
+
+    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not row or row.status != "processed":
+        return False
+    if row.embedding_model_version != EMBEDDING_VERSION:
+        return False
+    count = db.execute(
+        text("SELECT COUNT(*) FROM embeddings WHERE file_id = :fid"),
+        {"fid": file_id},
+    ).scalar()
+    return bool(count and count > 0)
 
 
 def search(
@@ -606,7 +622,19 @@ def _search_by_page(
                 "top_k": top_k,
             },
         )
-        return [row.chunk_text for row in results]
+        chunks = [row.chunk_text for row in results]
+        logger.info(
+            "Page %s search: found %s chunks from %s files",
+            page_num,
+            len(chunks),
+            len(file_ids),
+        )
+        if not chunks:
+            logger.warning(
+                "Page %s has no chunks — file may need re-indexing with page-aware extraction",
+                page_num,
+            )
+        return chunks
     except Exception as exc:
         logger.error("_search_by_page failed: %s", exc)
         return []

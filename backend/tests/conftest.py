@@ -95,8 +95,10 @@ def clear_auth_rate_limits():
 
 
 @pytest.fixture(autouse=True)
-def mock_gemini_embedding(monkeypatch):
+def mock_gemini_embedding(monkeypatch, request):
     """Avoid live Gemini embedding API calls in tests."""
+    if request.node.get_closest_marker("real_vector_store"):
+        return
     monkeypatch.setattr(
         "app.services.vector_store_service._get_embedding",
         lambda text: [0.1] * 768,
@@ -112,8 +114,10 @@ def mock_gemini_embedding(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def noop_vector_index_by_default(monkeypatch):
+def noop_vector_index_by_default(monkeypatch, request):
     """Skip DB embedding writes in API tests (SQLite has no pgvector)."""
+    if request.node.get_closest_marker("real_vector_store"):
+        return
     monkeypatch.setattr(
         "app.services.vector_store_service.chunk_and_store",
         lambda *args, **kwargs: True,
