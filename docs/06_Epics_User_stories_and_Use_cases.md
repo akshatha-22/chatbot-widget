@@ -20,7 +20,7 @@ User stories describe specific features from the user's perspective, following t
 *   **User Story 1.2**: As a user, I want to be able to upload plain text (TXT) files so that I can interact with their content.
 *   **User Story 1.3**: As a user, I want to see a clear indication (e.g., a loading spinner or success message) when my file is being processed, so that I know the system is working.
 *   **User Story 1.4**: As a user, I want the system to handle errors gracefully if I upload an unsupported file format, so that I understand what went wrong. *(Shipped: client validation banner + server MIME check 415; file picker shows all files.)*
-*   **User Story 1.5**: As a user, I want uploaded document indexes to survive server redeploys, so I do not have to re-upload after every Railway restart. *(Shipped: `faiss_index_blob` + `chunks_blob` in PostgreSQL.)*
+*   **User Story 1.5**: As a user, I want uploaded document embeddings to survive server redeploys, so I do not have to re-upload after every Railway restart. *(Shipped: pgvector rows in PostgreSQL `embeddings` table.)*
 *   **User Story 1.6**: As a user, I want to delete an uploaded file I no longer need, so that it is removed from my conversation and storage. *(Shipped: `DELETE .../files/{id}` + `FileListItem` inline confirm + optimistic UI.)*
 
 ### Epic 2: Conversational Interface

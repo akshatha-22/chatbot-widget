@@ -115,7 +115,7 @@ backend/
 │   │   │   ├── auth.py
 │   │   │   ├── chat.py     # Active chat routes
 │   │   │   ├── files.py    # upload, list, delete
-│   │   │   └── admin.py    # faiss-health
+│   │   │   └── admin.py    # embedding-health
 │   │   ├── auth.py         # Legacy/unused — prefer api/v1
 │   │   ├── chat.py         # Legacy/unused — prefer api/v1
 │   │   └── conversations.py
@@ -142,7 +142,7 @@ backend/
 │       ├── chat_service.py       # LLM, RAG, SSE, quota, sanitization
 │       ├── quota_service.py
 │       ├── response_cache.py     # per-user TTLCache
-│       ├── vector_store_service.py  # FAISS + versioning + delete cleanup
+│       ├── vector_store_service.py  # Gemini embed + pgvector + page retrieval
 │       └── file_parser_service.py
 ├── tests/                  # 105 pytest tests
 │   ├── test_api_*.py

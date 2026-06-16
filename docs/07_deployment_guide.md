@@ -16,7 +16,7 @@ How to run and deploy **Remi** using the **actual** stack in this repository.
 | Frontend | **Vercel** — https://chatbot-widget-client.vercel.app | Vite `npm run dev` :5173 |
 | Backend | **Railway** — https://chatbot-widgetclient-production.up.railway.app | Uvicorn :8000 |
 | Database | Managed **PostgreSQL** on Railway | **SQLite** (`sqlite:///./chatbot.db`) |
-| Vector / uploads | **PostgreSQL blobs** + optional disk cache | `backend/data/` |
+| Vector / uploads | **PostgreSQL pgvector** (`embeddings` table) + `backend/data/uploads/` | `backend/data/` (SQLite has no pgvector) |
 
 **Deployment hardening:** complete — `VITE_API_URL` on Vercel, `ENVIRONMENT=production` on Railway, `CORS_ORIGINS` aligned with Vercel domain.
 
@@ -137,11 +137,17 @@ If headers are missing, redeploy from latest `main` and confirm `ENVIRONMENT=pro
 
 On startup:
 
-1. `Base.metadata.create_all()` creates tables (including `audit_logs`)
+1. `Base.metadata.create_all()` creates tables (including `embeddings`, `audit_logs`)
 2. `app/database/migrations/startup.py` applies idempotent column/index patches
-3. Optional: `alembic upgrade head` using `app/database/migrations/versions/20250603_0001_*.py`
+3. `alembic upgrade head` — chain includes `007_status_detail`, `008_pdf_page_counts` (revision IDs must match exactly or healthcheck fails)
 
-FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`.
+**PostgreSQL requirements:**
+
+- Enable the **pgvector** extension on Railway Postgres
+- Embeddings persist in the `embeddings` table — survives redeploys
+- Do **not** set `EMBEDDING_MODEL=text-embedding-004` (retired); use `gemini-embedding-001` or omit
+
+**After major RAG upgrades:** re-upload large PDFs that were indexed under older extraction limits (e.g. partial page indexing).
 
 ---
 
@@ -150,7 +156,7 @@ FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_bl
 1. Open Vercel production URL (not localhost).
 2. Sign up / log in inside widget.
 3. Send a chat message — streaming reply.
-4. Upload a `.txt` file — wait for **Ready**.
+4. Upload a `.txt` or PDF file — wait for **Ready** (watch `status_detail` for large PDFs).
 5. Delete the file from Files panel — confirm inline, see success toast.
 6. DevTools → Network: API calls hit Railway HTTPS URL.
 7. Console: no CORS errors.
@@ -175,8 +181,9 @@ FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_bl
 | `AUTH_RATE_LIMIT_MAX_ATTEMPTS` | No | `5` |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | No | `60` |
 | `CLOUDFLARE_ONLY` | No | `false` |
+| `EMBEDDING_MODEL` | No | `gemini-embedding-001` (retired names auto-mapped) |
 | `OPENAI_API_KEY` | No | Fallback LLM |
-| `DATABASE_URL` | Postgres recommended | `sqlite:///./chatbot.db` |
+| `DATABASE_URL` | Postgres recommended (pgvector) | `sqlite:///./chatbot.db` |
 | `CORS_ORIGINS` | Prod Vercel URL | Localhost Vite ports |
 | `CORS_ORIGIN_REGEX` | No | `https://.*\.vercel.app` |
 | `VITE_API_URL` | Frontend build | `http://localhost:8000` |
@@ -191,7 +198,7 @@ FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_bl
 
 ### CI (`.github/workflows/ci.yml`)
 
-- Backend: `pytest tests/` (105 tests)
+- Backend: `pytest tests/` (191 tests)
 - Frontend: `npm run type-check`, `npm run build`
 
 ### Deploy (`.github/workflows/deploy.yml`)
@@ -218,7 +225,7 @@ FAISS data persists in PostgreSQL: `uploaded_files.faiss_index_blob`, `chunks_bl
 
 **Not implemented:** Prometheus, Sentry (unless you add it), structured log shipping.
 
-Use Railway logs for `[RAG]`, `[EMBED]`, `[FAISS]`, sanitization info lines.
+Use Railway logs for `[RAG]`, `[EMBED]`, OCR progress, sanitization info lines.
 
 ---
 
@@ -227,7 +234,8 @@ Use Railway logs for `[RAG]`, `[EMBED]`, `[FAISS]`, sanitization info lines.
 | Concern | Guidance |
 |---------|----------|
 | In-memory rate limit / cache | Per Railway replica — upgrade to Redis when `numReplicas > 1` |
-| FAISS | Indexes in Postgres blobs; memory cache per process |
+| pgvector / embeddings | Requires PostgreSQL with pgvector extension |
+| Large PDF indexing | OCR + embed can take several minutes; watch `status_detail` |
 | Auth rate limit | Set `AUTH_RATE_LIMIT_ENABLED=false` temporarily if debugging lockouts |
 
 ---
@@ -243,6 +251,8 @@ Use Railway logs for `[RAG]`, `[EMBED]`, `[FAISS]`, sanitization info lines.
 | No security headers | `ENVIRONMENT=production` + redeploy latest backend |
 | Login 429 | Auth rate limit — wait 60s |
 | Gemini 429 | Daily quota — UI uses `reset_at` from server |
+| Railway healthcheck fails on deploy | Check Alembic revision chain (`007_status_detail` → `008_pdf_page_counts`); see Railway build logs for `alembic upgrade head` |
+| Partial PDF indexing | Re-upload PDFs indexed before full-page extraction fix |
 
 ---
 

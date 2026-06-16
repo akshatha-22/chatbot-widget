@@ -20,7 +20,7 @@ flowchart LR
     API --> Gemini
     API -.->|fallback| OpenAI
     API --> DB
-    API --> Disk[Local uploads + FAISS]
+    API --> Disk[Local uploads + pgvector DB]
 ```
 
 ---
@@ -135,7 +135,7 @@ sequenceDiagram
     R-->>W: status pending
     R->>BG: BackgroundTasks
     BG->>E: extract_text chunk_and_store
-    E->>E: FAISS .index + .chunks
+    E->>E: Gemini embed → pgvector rows
     E->>E: status processed commit
     W->>W: Poll listFiles every 1.5s
 ```
@@ -147,16 +147,21 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     Q[User message]
+    PAC[_prepare_assistant_context]
+    Page{Page query?}
+    PageGet[get_page_content]
     BF[build_rag_context]
-    DB[(uploaded_files processed)]
-    FAISS[FAISS search top_k=5]
+    DB[(embeddings pgvector)]
     P[Gemini prompt DOCUMENT CONTEXT]
     G[Gemini stream]
 
-    Q --> BF
+    Q --> PAC
+    PAC --> Page
+    Page -->|yes| PageGet
+    Page -->|no| BF
+    PageGet --> P
     BF --> DB
-    BF --> FAISS
-    FAISS --> P
+    BF --> P
     P --> G
 ```
 
@@ -268,9 +273,9 @@ Desktop expanded: sidebar + chat + files (`md` / `lg` breakpoints).
 
 ## 11. Database ER diagram (schema)
 
-SQLAlchemy models in `backend/app/database/db.py`. Tables are created on API startup via `Base.metadata.create_all` in `main.py`, plus idempotent patches in `database/migrations/startup.py` (audit_logs, embedding_model_version, indexes). Alembic revision: `versions/20250603_0001_audit_logs_and_faiss_version.py`.
+SQLAlchemy models in `backend/app/database/db.py`. Tables are created on API startup via `Base.metadata.create_all` in `main.py`, plus idempotent patches in `database/migrations/startup.py`. Alembic chain includes `007_status_detail`, `008_pdf_page_counts`, and pgvector `embeddings` table migrations.
 
-**Also on disk (cache/fallback):** `backend/data/vector_store/` and `backend/data/uploads/`. **Primary index storage:** `uploaded_files.faiss_index_blob` and `chunks_blob` (survives Railway redeploy).
+**On disk:** `backend/data/uploads/`. **Primary vector storage:** PostgreSQL `embeddings` table with pgvector (survives Railway redeploy).
 
 ```mermaid
 erDiagram
@@ -279,6 +284,7 @@ erDiagram
     users ||--o{ audit_logs : "logged (SET NULL)"
     conversations ||--o{ messages : "has (CASCADE)"
     conversations ||--o{ uploaded_files : "has (CASCADE)"
+    uploaded_files ||--o{ embeddings : "has (CASCADE)"
 
     users {
         int id PK "indexed"
@@ -311,10 +317,21 @@ erDiagram
         int conversation_id FK "NOT NULL, ON DELETE CASCADE"
         varchar filename "255"
         varchar file_path "500, disk path"
-        varchar status "50, pending | processed | failed"
-        blob faiss_index_blob "nullable, FAISS index bytes"
-        blob chunks_blob "nullable, pickled text chunks"
-        varchar embedding_model_version "nullable, e.g. all-MiniLM-L6-v2"
+        varchar status "50, pending | extracting | embedding | processed | failed"
+        text status_detail "nullable, progress message"
+        int pdf_page_count "nullable"
+        int indexed_page_count "nullable"
+        varchar embedding_model_version "nullable, e.g. gemini-embedding-001-v768"
+        datetime created_at "utc default"
+    }
+
+    embeddings {
+        int id PK
+        varchar file_id FK "ON DELETE CASCADE"
+        text chunk_text
+        text embedding "pgvector"
+        int chunk_index
+        int page "default 1"
         datetime created_at "utc default"
     }
 
@@ -345,6 +362,7 @@ erDiagram
 | `users` | `audit_logs` | `audit_logs.user_id` | **SET NULL** | best-effort audit trail |
 | `conversations` | `messages` | `messages.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.messages` |
 | `conversations` | `uploaded_files` | `uploaded_files.conversation_id` | **CASCADE** | `all, delete-orphan` on `Conversation.files` |
+| `uploaded_files` | `embeddings` | `embeddings.file_id` | **CASCADE** | `all, delete-orphan` on `UploadedFile.embeddings` |
 
 Deleting a **user** removes all their conversations, messages, and uploaded file rows. Deleting a **conversation** removes its messages and file rows (disk files under `backend/data/uploads/` are not automatically purged by the ORM).
 

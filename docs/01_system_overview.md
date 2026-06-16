@@ -10,8 +10,10 @@ Remi is a **self-contained React widget** plus a **FastAPI API** that provides:
 
 - In-widget **signup / login** (JWT)
 - **Streaming chat** (Server-Sent Events) powered primarily by **Google Gemini**
-- **Document Q&A** via **FAISS** + **sentence-transformers** (keyword fallback when ML libs absent)
-- **File upload** (PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG) with background embedding; indexes **persisted in DB**
+- **Document Q&A** via **Gemini embeddings + pgvector** (keyword fallback when embedding fails)
+- **File upload** (PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG) with background extraction + embedding; vectors **persisted in PostgreSQL `embeddings` table**
+- **Page-aware RAG** — "what's on page N" uses direct page retrieval; document-first routing before web search
+- **PDF extraction** — PyMuPDF reads all pages; Gemini OCR for image-only pages (large flipbooks supported)
 - **Security hardening** — required `SECRET_KEY`, prompt sanitization, MIME magic-byte validation, security headers, audit logging, auth rate limiting, per-user Gemini daily quota (UTC reset)
 - **Response caching** — per-user in-process TTL cache for repeated questions (no Redis); `cache_hit` on assistant messages
 - **File delete** — API + `FileListItem` UI with inline confirm and optimistic removal
@@ -67,7 +69,7 @@ graph TB
 | Frontend | React 18, TypeScript, Vite, Tailwind | `client/` |
 | Backend | FastAPI, Uvicorn, SQLAlchemy 2 | `backend/app/` |
 | Database | SQLite default; PostgreSQL optional | `DATABASE_URL` |
-| Vectors | FAISS + chunks in DB blobs; disk + in-memory cache | `uploaded_files` + `backend/data/vector_store/` |
+| Vectors | Gemini `gemini-embedding-001` + pgvector in `embeddings` table | PostgreSQL (required in prod) |
 | LLM | Gemini 2.5 Flash (+ model fallbacks); OpenAI if configured | `chat_service.py` |
 
 ---
@@ -79,27 +81,31 @@ graph TB
 1. User sends message in `CompactWidget` or `ExpandedWidget`.
 2. `streamSend.ts` optimistically adds user message; calls `streamMessage()` in `client/src/api/chat.ts` (`fetch` + `ReadableStream`).
 3. `POST /api/v1/chat/conversations/{id}/messages/stream` saves the user message, streams assistant tokens as SSE.
-4. Backend: `_prepare_assistant_context` → RAG (if processed files exist) → Gemini stream → single DB write for assistant message.
+4. Backend: `_prepare_assistant_context` → document-first RAG (page lookup or semantic search) → tiered prompt → Gemini stream → single DB write for assistant message.
 5. Final SSE event: JSON `{ "event": "done", ... }`; UI replaces placeholder message.
 
 ### 2. File upload → RAG
 
 1. `POST /api/v1/chat/conversations/{id}/files` (multipart, max **100MB**).
 2. File saved under `backend/data/uploads/`; DB row `status=pending`.
-3. Background: daemon thread runs `process_file_embedding` → `extract_text` → `chunk_and_store` (FAISS).
-4. MIME validated server-side; chunks/index stored in **DB blobs** + disk; status becomes `processed` or `failed`.
-5. Frontend polls every **1.5s** while any file is `pending`. Upload modal shows all files in picker; validates after selection.
+3. Background: daemon thread runs `process_file_embedding` → `extract_text` (PyMuPDF + OCR) → `chunk_and_store` (Gemini embed + pgvector).
+4. Status progresses `pending` → `extracting` → `embedding` → `processed` / `failed`; `status_detail` shows progress (page counts, OCR status).
+5. Frontend polls every **1.5s** while any file is still processing.
 
 ### 2b. File delete
 
 1. User clicks trash on `FileListItem` → inline confirm.
-2. `DELETE /api/v1/chat/conversations/{id}/files/{file_id}` — DB commit first, then disk + FAISS cache cleanup.
+2. `DELETE /api/v1/chat/conversations/{id}/files/{file_id}` — DB commit first (cascades `embeddings` rows), then disk cleanup.
 3. UI optimistically removes the row; toast on success. Non-owner gets **403**.
 
 ### 3. Document Q&A
 
-1. On each message, `build_rag_context()` searches FAISS across processed files (`top_k=5`).
-2. Chunks are injected into the Gemini prompt as `DOCUMENT CONTEXT` (Google Search disabled when RAG context is present).
+1. `_prepare_assistant_context()` runs on each message — **documents before web search**.
+2. Pending files → polite wait message. Page queries → `get_page_content()` by `embeddings.page`.
+3. Otherwise `build_rag_context()` runs pgvector cosine search (`top_k=5`).
+4. `rag_quality_service.classify_rag_context()` sets prompt tier (DIRECT / PARTIAL / DEFLECTED / EMPTY).
+5. Chunks injected as `DOCUMENT CONTEXT`; Google Search disabled when document context is used.
+6. If RAG is empty and the question is clearly unrelated to uploaded filenames, web search is used instead.
 
 ### 4. PDF from chat
 
@@ -130,7 +136,7 @@ graph TB
 | `MobileConversationList.tsx` | Conversation list + folder chips |
 | `MobileFilesPanel.tsx` | Files + generate on mobile |
 | `FileUploadModal.tsx` | Drag-and-drop upload; validation errors; no `accept` filter |
-| `FileListItem.tsx` | File row with status, inline delete confirm, trash icon |
+| `FileListItem.tsx` | File row with status (`extracting`/`embedding`), `status_detail` progress, inline delete |
 | `NavTooltip.tsx` | Tooltips on nav buttons (desktop hover, mobile long-press) |
 | `RateLimitBanner.tsx` | Gemini quota countdown (429) |
 | `constants/uploadFormats.ts` | Shared supported extensions |
@@ -149,13 +155,14 @@ graph TB
 | `api/v1/auth.py` | signup, login, me (+ login audit + rate limit on both) |
 | `api/v1/chat.py` | conversations, messages, stream, generate |
 | `api/v1/files.py` | upload, list, delete |
-| `api/v1/admin.py` | `GET /admin/faiss-health` (user-scoped) |
-| `services/chat_service.py` | LLM, RAG, sanitization, PDF detection, SSE |
-| `services/vector_store_service.py` | Chunk, embed, FAISS search, versioning, delete cleanup |
+| `api/v1/admin.py` | `GET /admin/embedding-health` (user-scoped) |
+| `services/chat_service.py` | LLM, document-first RAG routing, sanitization, PDF detection, SSE |
+| `services/rag_quality_service.py` | RAG context quality classification |
+| `services/vector_store_service.py` | Gemini embed, pgvector search, page retrieval, versioning |
 | `services/audit_service.py` | Best-effort audit log writes |
 | `services/auth_rate_limit_service.py` | Login/signup brute-force protection |
 | `core/sanitizer.py` | Prompt-injection stripping |
-| `services/file_parser_service.py` | PDF/DOCX/XLSX/text extraction |
+| `services/file_parser_service.py` | PyMuPDF + Gemini OCR PDF/DOCX/XLSX/text extraction |
 | `services/auth_service.py` | Users, JWT dependency |
 | `core/security.py` | bcrypt + python-jose |
 | `database/db.py` | SQLAlchemy models |
@@ -169,7 +176,8 @@ graph TB
 | `users` | email, bcrypt `hashed_password` |
 | `conversations` | `user_id` FK, title |
 | `messages` | role, content, optional PDF fields |
-| `uploaded_files` | UUID id, path, blobs, `embedding_model_version`, `pending` / `processed` / `failed` |
+| `uploaded_files` | UUID id, path, `status`, `status_detail`, `pdf_page_count`, `indexed_page_count`, `embedding_model_version`; `pending` → `extracting` → `embedding` → `processed` / `failed` |
+| `embeddings` | Per-chunk vectors: `chunk_text`, pgvector `embedding`, `page`, `chunk_index`, FK → `uploaded_files` |
 | `audit_logs` | action, user_id, ip, metadata (best-effort) |
 | `gemini_daily_usage` | per-user UTC daily Gemini call count |
 
@@ -184,7 +192,7 @@ Cascade deletes: user → conversations → messages & files. ER diagram: [02_ar
 | Auth | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` |
 | Chat | CRUD `/chat/conversations`, `GET/POST .../messages`, `POST .../messages/stream`, `POST .../generate` |
 | Files | `POST/GET/DELETE .../conversations/{id}/files` |
-| Admin | `GET /admin/faiss-health` (JWT, user-scoped) |
+| Admin | `GET /admin/embedding-health` (JWT, user-scoped) |
 | Public | `GET /`, `GET /health` |
 
 Interactive docs: `http://localhost:8000/docs` when the API is running.

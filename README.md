@@ -35,7 +35,7 @@ This README reflects **what is in the repository today**.
 | **Frontend** (`client/`) | React SPA — no router; `App.tsx` renders only the widget |
 | **Backend** (`backend/app/`) | FastAPI REST + SSE streaming, JWT auth, RAG, LLM orchestration |
 | **Data** | SQLite by default; PostgreSQL via `DATABASE_URL` |
-| **Vector store** | FAISS + sentence-transformers when installed; chunks also stored in DB blobs + disk; in-memory index cache per process |
+| **Vector store** | **Gemini `gemini-embedding-001`** (768-dim) + **pgvector** in PostgreSQL `embeddings` table; keyword fallback when embedding API fails |
 
 There is **no** LangChain, Redis, Celery, WebSocket server, or Kubernetes runtime in the live codebase. Prompt-injection sanitization, audit logging, and auth rate limiting **are** implemented (see [Auth & security](#auth--security)).
 
@@ -68,7 +68,7 @@ There is **no** LangChain, Redis, Celery, WebSocket server, or Kubernetes runtim
 | google-genai | Primary Gemini client with Google Search grounding |
 | google-generativeai | Legacy Gemini fallback |
 | OpenAI SDK | Fallback when Gemini unavailable |
-| FAISS + sentence-transformers | RAG embeddings & vector search (optional locally; required in Docker/Railway) |
+| pgvector (PostgreSQL) | Cosine-similarity vector search over `embeddings` rows |
 | cachetools | In-process TTL response cache (no Redis) |
 | PyPDF2, python-docx, openpyxl | File text extraction |
 | python-magic | Magic-byte MIME validation on uploads |
@@ -162,9 +162,9 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
           │
     ┌─────┴─────┬──────────────┐
     ▼           ▼              ▼
- SQLite/     FAISS + chunks  Gemini (google-genai)
- PostgreSQL  (DB blobs +     + OpenAI fallback
-             disk cache)      + TTL response cache
+ SQLite/     pgvector        Gemini (google-genai)
+ PostgreSQL  embeddings      + OpenAI fallback
+             table           + TTL response cache
 ```
 
 ### Normal chat flow
@@ -183,12 +183,13 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 ### RAG flow
 
 1. User uploads PDF, DOCX, XLSX, or plain text to a conversation.
-2. Backend validates MIME type + size, saves bytes to `backend/data/uploads/`, and queues embedding.
-3. `vector_store_service.py` chunks text, builds FAISS embeddings when ML libs are installed, and **persists index + chunks as binary blobs** on `uploaded_files` (survives Railway redeploys). Also caches indexes in memory per process and mirrors to `backend/data/vector_store/`.
-4. If FAISS/sentence-transformers are missing locally, chunks are stored with **keyword search fallback** so uploads still reach `processed`.
-5. Indexing runs in a FastAPI `BackgroundTasks` daemon thread (synchronous when `INLINE_FILE_PROCESSING=1` in tests).
-6. On each chat turn, top-k chunks are retrieved and injected into the LLM prompt. Stale FAISS indexes (embedding model version mismatch) are **auto-reindexed** before search.
-7. Repeated identical questions from the **same user** with the same RAG context can hit the **per-user TTL response cache** (no second Gemini call). Assistant responses include `cache_hit: true` when served from cache.
+2. Backend validates MIME type + size, saves bytes to `backend/data/uploads/`, and queues embedding (`status=pending`).
+3. Background processing: `extracting` → `embedding` → `processed` (or `failed`). Progress appears in `status_detail` (e.g. "Reading 256 pages…", "OCR page 12 of 256…").
+4. **PDF extraction:** PyMuPDF reads all pages in parallel; Gemini OCR fills image-only pages (no page cap). Page-marked PDFs get **one embedding chunk per page** in the `embeddings` table with a `page` column.
+5. **Embeddings:** Gemini `gemini-embedding-001` (768-dim) stored in PostgreSQL via pgvector cosine search. Stale rows (model version mismatch) are **auto-reindexed** before search.
+6. **Document-first routing:** `_prepare_assistant_context()` checks uploaded files before web search. Page queries ("what's on page 115") use direct page retrieval, not semantic search. Unrelated questions may still use Google Search when RAG is empty.
+7. **RAG quality tiers:** `rag_quality_service` classifies context as DIRECT / PARTIAL / DEFLECTED / EMPTY to tune prompt instructions.
+8. Repeated identical questions from the **same user** with the same RAG context can hit the **per-user TTL response cache** (no second Gemini call). Assistant responses include `cache_hit: true` when served from cache.
 
 ### LLM provider order
 
@@ -211,7 +212,7 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | **RemiAvatar2D / RemiFace** | Shared mascot in headers and message bubbles |
 | **NavTooltip** | Hover/tap hints on toolbar, tabs, and header buttons |
 | **RateLimitBanner** | Server-authoritative countdown when daily Gemini quota is exceeded (429 + `reset_at`) |
-| **FileListItem** | Per-file row with inline delete confirm + trash icon (desktop + mobile) |
+| **FileListItem** | Per-file row with processing status (`extracting` / `embedding`), `status_detail` progress, inline delete confirm + trash icon |
 | **CompactWidget** | 350px bottom-right chat panel |
 | **ExpandedWidget** | Full workspace: sidebar, chat, files tab, generate tab |
 | **WidgetAuthPanel** | Login/signup inside the widget — host page stays untouched |
@@ -243,9 +244,10 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 | --- | --- |
 | **Upload** | PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG — max 100MB; file picker shows **all files** (validated after selection) |
 | **Upload modal** | Drag-and-drop, validation error banner, attach-badge file count in chat header |
-| **File list** | Expanded widget "Files" tab; status `pending` → `processed` / `failed`; polls every 1.5s while pending |
-| **File delete** | Trash icon → inline confirm → optimistic UI + `DELETE …/files/{id}`; removes disk, DB blobs, FAISS cache |
-| **RAG search** | FAISS L2 when available; keyword fallback otherwise; in-memory index cache; versioned embeddings |
+| **File list** | Expanded widget "Files" tab; status `pending` → `extracting` → `embedding` → `processed` / `failed`; polls every 1.5s while processing |
+| **File delete** | Trash icon → inline confirm → optimistic UI + `DELETE …/files/{id}`; removes disk file + `embeddings` rows |
+| **RAG search** | pgvector cosine similarity (top 5); page-specific direct lookup; keyword fallback; versioned embeddings |
+| **Page queries** | "What's on page N" uses `embeddings.page` direct retrieval, not web search |
 
 ### Document generation
 
@@ -318,9 +320,10 @@ chatbot-widget/
 │   │   │   ├── audit_service.py     # Best-effort audit log writes
 │   │   │   ├── auth_service.py
 │   │   │   ├── file_parser_service.py
-│   │   │   └── vector_store_service.py  # FAISS + versioning + delete cleanup
+│   │   │   ├── rag_quality_service.py   # RAG context quality tiers
+│   │   │   └── vector_store_service.py  # Gemini embed + pgvector search + page retrieval
 │   │   └── schemas/                 # Pydantic models + audit_log.py ORM
-│   ├── tests/                       # test_api_*.py + tests/unit/ (105 tests)
+│   ├── tests/                       # test_api_*.py + tests/unit/ (191 tests)
 │   ├── requirements.txt
 │   └── pytest.ini
 ├── package.json                     # npm workspace root
@@ -374,6 +377,7 @@ Copy `.env.example` → `.env.local` at the **repo root**. Both backend (`config
 | --- | --- | --- | --- |
 | `GEMINI_API_KEY` | For real AI | `""` | Primary LLM + Google Search grounding |
 | `GEMINI_MODEL` | No | `gemini-2.5-flash` | Gemini model name |
+| `EMBEDDING_MODEL` | No | `gemini-embedding-001` | Gemini embedding model (retired names auto-mapped) |
 | `OPENAI_API_KEY` | No | `""` | Fallback LLM |
 | `OPENAI_MODEL` | No | `gpt-3.5-turbo` | OpenAI model name |
 | `SECRET_KEY` | **Yes** (min 32 chars) | none — app fails to start | JWT signing — **not** `JWT_SECRET_KEY` |
@@ -439,7 +443,8 @@ All chat and file routes require: `Authorization: Bearer <token>`
 | --- | --- | --- |
 | `POST` | `/chat/conversations/{id}/files` | Upload file (multipart); queues RAG indexing |
 | `GET` | `/chat/conversations/{id}/files` | List uploaded files |
-| `DELETE` | `/chat/conversations/{id}/files/{file_id}` | Delete file, vectors, and disk copy (403 if not owner) |
+| `DELETE` | `/chat/conversations/{id}/files/{file_id}` | Delete file, embeddings rows, and disk copy (403 if not owner) |
+| `POST` | `/chat/conversations/{id}/files/{file_id}/reindex` | Re-run extraction + embedding (API only; no frontend UI) |
 
 ### Admin (`/admin`, JWT required)
 
@@ -482,7 +487,7 @@ venv\Scripts\python.exe -m pytest tests/ -v
 python -m pytest tests/ -v
 ```
 
-**105 tests** in `backend/tests/` (API integration + `tests/unit/` for sanitizer, cache, MIME magic, auth rate limit, audit, FAISS versioning, file delete). No live LLM calls — `conftest.py` clears API keys and mocks FAISS indexing on uploads by default.
+**191 tests** in `backend/tests/` (API integration + `tests/unit/` for sanitizer, cache, MIME magic, auth rate limit, audit, RAG routing, page extraction, embedding versioning, file delete). No live LLM calls — `conftest.py` clears API keys and mocks pgvector indexing on uploads by default.
 
 See `backend/tests/README.md` for fixture details.
 
@@ -524,7 +529,8 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 - Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
 - Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
 - Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
-- Embeddings are **persisted in PostgreSQL** (`embeddings` table + `embedding_model_version`) so Railway redeploys do not wipe RAG.
+- Embeddings are **persisted in PostgreSQL** (`embeddings` table with pgvector + `embedding_model_version`) so Railway redeploys do not wipe RAG. Railway Postgres must have the **pgvector** extension enabled.
+- Alembic chain includes `007_status_detail` and `008_pdf_page_counts`; migration revision IDs must match (healthcheck runs `alembic upgrade head` on startup).
 - Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
 
 ### Production (live)
@@ -568,7 +574,9 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | **301 on Railway curl** | Use `https://` prefix: `curl.exe -sS https://your-api.up.railway.app/health` |
 | **Security headers missing on prod** | Set `ENVIRONMENT=production` and redeploy latest backend from `main` |
 | **Backend won't start** | Set `SECRET_KEY` (32+ random chars) in `.env.local` — no default is provided |
-| **Upload shows "Failed — try again"** | Install full backend deps: `pip install -r requirements.txt` (needs `faiss-cpu`, `sentence-transformers`). Fallback keyword search works without them but embedding must succeed for `processed`. |
+| **Upload shows "Failed — try again"** | Check Railway logs for extraction/OCR errors. Ensure `GEMINI_API_KEY` is set (needed for OCR on image PDFs). Large flipbooks may take several minutes — watch `status_detail` progress. |
+| **Page query returns web search** | Wait until file status is `processed`. Re-upload if indexed before the pgvector migration. Ask "what's on page N" after indexing completes. |
+| **Only partial PDF indexed** | Fixed: all pages are extracted (PyMuPDF + OCR). Re-upload older PDFs that were indexed under the previous 74-page cap. |
 | **File picker hides files** | Fixed: picker shows all files; unsupported types show a red validation message after selection |
 | **No AI responses** | Verify `GEMINI_API_KEY` in `.env.local`; restart backend after env changes |
 | **PDF not downloading** | Use phrasing with "pdf" + a verb (generate/create/export); check browser download permissions |
@@ -586,4 +594,4 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 **Last updated:** June 2026  
-**Status:** Production-deployed widget — security hardening sprint complete (sanitization, MIME magic bytes, body limits, audit logs, auth rate limit, per-user cache, FAISS versioning, file delete), 105 tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs and embeddable `build:lib` package.
+**Status:** Production-deployed widget — pgvector RAG with document-first routing, full PDF extraction (PyMuPDF + Gemini OCR), page-aware retrieval, processing progress UI, security hardening, 191 tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs and embeddable `build:lib` package.

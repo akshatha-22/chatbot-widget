@@ -33,19 +33,22 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Upload formats | PDF, DOCX, XLS/XLSX, TXT, MD, CSV, JSON, LOG (`uploadFormats.ts` + `mime_validation.py`) |
 | Max size | **100 MB** per file (`files.py`); **52 MB** request body cap on upload route (`main.py`) |
 | Magic-byte MIME | First 512 bytes validated (`python-magic` + fallback) — 415 on mismatch |
-| File delete | `DELETE .../files/{id}` — DB-first, then FAISS cache + disk; frontend `FileListItem` with optimistic UI |
+| File delete | `DELETE .../files/{id}` — DB-first (cascades `embeddings`), then disk; frontend `FileListItem` with optimistic UI |
 | File picker | Shows **all files** — no `accept` filter; client validates after selection |
 | Drag-and-drop UI | `FileUploadModal.tsx` with validation error banner |
 | Chat file badge | Count in header; tap to upload (0 files) or view Files panel |
-| Processing states | `pending` → `processed` / `failed` |
+| Processing states | `pending` → `extracting` → `embedding` → `processed` / `failed` |
+| Progress detail | `status_detail` on file row — page counts, OCR progress ("OCR page 12 of 256…") |
 | Background embedding | Daemon thread after upload (`process_file_embedding`) |
-| Chunking | ~**500 characters** per chunk (`split_text`) |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` when installed |
-| Vector store | FAISS `IndexFlatL2` + **DB blobs** (`faiss_index_blob`, `chunks_blob`) + disk + in-memory cache |
-| Dev fallback | Keyword search when FAISS/sentence-transformers not installed |
-| Retrieval | Top **5** chunks; L2 or keyword (`vector_store_service.search`) |
-| RAG in chat | Injected as `DOCUMENT CONTEXT`; disables Google Search when RAG present |
-| Status polling | **1.5s** interval while `pending` (`index.tsx`) |
+| PDF extraction | PyMuPDF all pages (parallel); Gemini OCR for image pages; pdfplumber for small PDFs |
+| Chunking | **One chunk per page** for page-marked PDFs; ~500 chars for plain text; one row per spreadsheet row |
+| Embeddings | **Gemini `gemini-embedding-001`** (768-dim) |
+| Vector store | PostgreSQL **pgvector** in `embeddings` table (`page`, `chunk_index`, `chunk_text`) |
+| Dev fallback | Keyword search when Gemini embed or pgvector fails |
+| Retrieval | Top **5** chunks via cosine similarity; page queries use direct `embeddings.page` lookup |
+| RAG routing | Document-first in `_prepare_assistant_context`; web only when RAG empty and question unrelated |
+| RAG quality | `rag_quality_service` — DIRECT / PARTIAL / DEFLECTED / EMPTY prompt tiers |
+| Status polling | **1.5s** interval while `pending`, `extracting`, or `embedding` (`index.tsx`) |
 
 **Not shipped:** citation links to page numbers, confidence scores, S3 storage, distributed embed queue.
 
@@ -128,9 +131,9 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 |-------|----------|
 | Streaming | One HTTP connection per message; chunks buffered client-side |
 | File poll | 1.5s interval, 5 min max (`index.tsx`) |
-| Embedding | CPU-bound in background thread; no distributed queue |
+| Embedding | Network-bound Gemini embed + OCR; large PDFs may take several minutes |
 | Response cache | Per-user TTLCache — `(user_id, question, rag_digest, use_search)`; `cache_hit` on assistant messages |
-| FAISS versioning | `embedding_model_version` on uploads; auto-reindex on mismatch; `GET /admin/faiss-health` (user-scoped) |
+| Embedding versioning | `embedding_model_version` on uploads; auto-reindex on mismatch; `GET /admin/embedding-health` (user-scoped) |
 | DB default | SQLite — fine for dev; Postgres recommended for production |
 | Stream on widget close | **Does not abort** — known gap (see ARCHITECTURE.md) |
 
@@ -191,7 +194,9 @@ Use this when demoing or writing tests:
 
 - [ ] Sign up and sign in inside widget  
 - [ ] Stream a chat reply  
-- [ ] Upload PDF and ask a question about it (wait for `processed`)  
+- [ ] Upload PDF and ask a question about it (wait for `processed`)
+- [ ] Ask "what's on page N" on a multi-page PDF (document source, not web)
+- [ ] Ask a web question, then a document question in the same chat (document still used)  
 - [ ] Delete an uploaded file from Files panel (confirm → toast)  
 - [ ] Expand widget; use mobile tabs under narrow viewport  
 - [ ] Star a conversation; filter Starred  
