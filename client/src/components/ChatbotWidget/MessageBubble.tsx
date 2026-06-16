@@ -25,7 +25,7 @@ const SOURCE_CONFIG: Record<
   },
   web: {
     icon: '🌐',
-    label: 'From the web',
+    label: 'From the web — not in your document',
     color: '#2979FF',
   },
   none: {
@@ -89,7 +89,7 @@ export default function MessageBubble({
                       rel="noopener noreferrer"
                       className="remi-link-item"
                     >
-                      <ExternalLink size={11} />
+                      <ExternalLink size={11} className="remi-link-icon" />
                       <span>{link.title}</span>
                     </a>
                   </li>
