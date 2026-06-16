@@ -55,6 +55,19 @@ def _embedding_model_id() -> str:
     return settings.EMBEDDING_MODEL.removeprefix("models/")
 
 
+def _embedding_models_to_try() -> List[str]:
+    primary = _embedding_model_id()
+    models = [primary]
+    for fallback in ("gemini-embedding-001",):
+        if fallback not in models:
+            models.append(fallback)
+    return models
+
+
+def _format_pgvector(values: List[float]) -> str:
+    return "[" + ",".join(str(v) for v in values) + "]"
+
+
 def _ensure_genai_configured() -> bool:
     return settings.gemini_configured()
 
@@ -91,27 +104,30 @@ def _get_embeddings_batch(
     results: List[List[float]] = []
     client = _genai_client()
     config = _embed_config()
+    last_error: Exception | None = None
 
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start : start + batch_size]
-        try:
-            response = client.models.embed_content(
-                model=_embedding_model_id(),
-                contents=batch,
-                config=config,
-            )
-            batch_vectors = _extract_batch_embeddings(response)
-            if len(batch_vectors) != len(batch):
-                logger.warning(
-                    "Embedding batch size mismatch: sent %s, got %s",
-                    len(batch),
-                    len(batch_vectors),
+        batch_vectors: List[List[float]] = []
+        for model_id in _embedding_models_to_try():
+            try:
+                response = client.models.embed_content(
+                    model=model_id,
+                    contents=batch,
+                    config=config,
                 )
-                batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
-            results.extend(batch_vectors)
-        except Exception as exc:
-            logger.error("Gemini batch embedding failed: %s", exc)
-            results.extend([[] for _ in batch])
+                batch_vectors = _extract_batch_embeddings(response)
+                if batch_vectors and any(batch_vectors):
+                    break
+            except Exception as exc:
+                last_error = exc
+                logger.error("Gemini batch embedding failed (%s): %s", model_id, exc)
+
+        if len(batch_vectors) != len(batch):
+            batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
+        if not any(batch_vectors) and last_error is not None:
+            logger.error("All embedding models failed for batch starting at %s", start)
+        results.extend(batch_vectors[: len(batch)])
 
     return results
 
@@ -322,8 +338,7 @@ def chunk_and_store(
             source_text, chunks, chunk_size, chunk_overlap
         )
         if not resolved_chunks:
-            logger.warning("No chunks for file %s", file_id)
-            return False
+            raise ValueError("No text chunks to index from this file")
 
         _persist_raw_text(file_id, raw_text or source_text, db)
 
@@ -361,7 +376,7 @@ def chunk_and_store(
             params = {
                 "file_id": file_id,
                 "chunk_text": chunk,
-                "embedding": json.dumps(embedding),
+                "embedding": _format_pgvector(embedding),
                 "chunk_index": index,
             }
             if _is_postgres(db):
@@ -382,12 +397,20 @@ def chunk_and_store(
         )
         db.commit()
         logger.info("Stored %s chunks for file %s", stored, file_id)
-        return stored > 0
+        if stored == 0:
+            raise ValueError(
+                "Embedding API returned no vectors. On Railway, set GEMINI_API_KEY and "
+                f"EMBEDDING_MODEL=gemini-embedding-001 (current: {settings.EMBEDDING_MODEL})."
+            )
+        return True
 
+    except ValueError:
+        db.rollback()
+        raise
     except Exception as exc:
         logger.error("chunk_and_store failed for %s: %s", file_id, exc)
         db.rollback()
-        return False
+        raise ValueError(f"Could not save embeddings to database: {exc}") from exc
 
 
 def search(
@@ -443,7 +466,7 @@ def search(
                 """
             ).bindparams(bindparam("file_ids", expanding=True)),
             {
-                "query_vec": json.dumps(query_embedding),
+                "query_vec": _format_pgvector(query_embedding),
                 "file_ids": file_ids,
                 "top_k": top_k,
             },

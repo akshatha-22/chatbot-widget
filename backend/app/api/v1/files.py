@@ -28,8 +28,23 @@ UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
     """Parse, chunk, and index a file in the background (separate DB session)."""
     print(f"[EMBED] Starting embedding for {filename} ({file_id})")
+    if not os.path.isfile(file_path):
+        error_msg = f"Uploaded file missing on server: {filename}"
+        print(f"[EMBED] ERROR: {error_msg}")
+        db = SessionLocal()
+        try:
+            db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+            if db_file:
+                db_file.status = "failed"
+                db_file.processing_error = error_msg[:500]
+                db.commit()
+        finally:
+            db.close()
+        return
+
     if not vector_store_service.gemini_embeddings_available():
-        print("[EMBED] ERROR: GEMINI_API_KEY is not configured — cannot embed files")
+        print("[EMBED] WARNING: GEMINI_API_KEY is not configured — embedding will fail")
+
     db = SessionLocal()
     try:
         print(f"[EMBED] Extracting text from {filename}")
@@ -40,14 +55,13 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
         print(f"[EMBED] Extracted {len(extracted_text)} characters")
         row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
         print(f"[EMBED] Creating pgvector embeddings for {file_id}")
-        if not vector_store_service.chunk_and_store(
+        vector_store_service.chunk_and_store(
             file_id,
             extracted_text,
             db=db,
             chunks=row_chunks,
             raw_text=extracted_text,
-        ):
-            raise ValueError(f"Failed to store embeddings for {filename}")
+        )
         print(f"[EMBED] Embeddings stored successfully")
 
         db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
@@ -82,7 +96,7 @@ def _run_embedding_in_thread(file_id: str, file_path: str, filename: str) -> Non
     thread = threading.Thread(
         target=process_file_embedding,
         args=(file_id, file_path, filename),
-        daemon=True,
+        daemon=False,
         name=f"embed-{file_id[:8]}",
     )
     thread.start()

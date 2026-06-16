@@ -309,11 +309,12 @@ export default function FileUploadModal({
                           <div className="mt-1 text-xs text-red-500">
                             <div className="flex items-center gap-1">
                               <X size={12} aria-hidden />
-                              Processing failed — delete and re-upload
+                              Processing failed
                             </div>
-                            {failureDetail && (
-                              <p className="mt-0.5 text-[11px] text-red-600">{failureDetail}</p>
-                            )}
+                            <p className="mt-0.5 text-[11px] text-red-600">
+                              {failureDetail ||
+                                'Delete this file and upload again after the server redeploys.'}
+                            </p>
                           </div>
                         )}
                         {!r.uploading && r.error && (

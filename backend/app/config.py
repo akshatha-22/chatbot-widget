@@ -168,6 +168,23 @@ class Settings(BaseSettings):
             return s[1:-1].strip()
         return s
 
+    @field_validator("EMBEDDING_MODEL", mode="before")
+    @classmethod
+    def normalize_embedding_model(cls, v: object) -> str:
+        """Map retired Gemini embedding model names to gemini-embedding-001."""
+        if not isinstance(v, str):
+            return "gemini-embedding-001"
+        model = v.strip().removeprefix("models/")
+        retired = {
+            "",
+            "text-embedding-004",
+            "text-embedding-005",
+            "embedding-001",
+        }
+        if model in retired:
+            return "gemini-embedding-001"
+        return model
+
     def gemini_configured(self) -> bool:
         return bool((self.GEMINI_API_KEY or "").strip())
 

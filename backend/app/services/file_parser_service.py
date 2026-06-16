@@ -5,7 +5,8 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-MAX_PDF_OCR_BYTES = 20 * 1024 * 1024
+MAX_PDF_OCR_BYTES = 100 * 1024 * 1024
+PDF_FILE_API_THRESHOLD_BYTES = 4 * 1024 * 1024
 
 
 def is_row_chunked_format(filename: str) -> bool:
@@ -126,6 +127,8 @@ def _extract_pdf_pymupdf(file_path: str) -> str:
 
 def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
     """OCR fallback for image-only PDFs (e.g. flipbook catalogues) via Gemini."""
+    import time
+
     from app.config import settings
 
     if not settings.gemini_configured():
@@ -134,36 +137,64 @@ def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
     file_size = os.path.getsize(file_path)
     if file_size > MAX_PDF_OCR_BYTES:
         raise ValueError(
-            f"{filename} is too large for automatic OCR ({file_size // (1024 * 1024)}MB). "
-            "Try a smaller PDF or a text-based export."
+            f"{filename} exceeds the {MAX_PDF_OCR_BYTES // (1024 * 1024)}MB OCR limit."
         )
 
     from google import genai
     from google.genai import types
 
-    with open(file_path, "rb") as handle:
-        pdf_bytes = handle.read()
-
     client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
     model = settings.GEMINI_MODEL.removeprefix("models/")
-    response = client.models.generate_content(
-        model=model,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                    types.Part.from_text(
-                        text=(
-                            "Extract all readable text from this PDF document. "
-                            "Include product names, part numbers, descriptions, and tables. "
-                            "Return plain text only — no markdown code fences."
-                        )
-                    ),
+    prompt = (
+        "Extract all readable text from this PDF document. "
+        "Include product names, part numbers, descriptions, and tables. "
+        "Return plain text only — no markdown code fences."
+    )
+
+    uploaded = None
+    try:
+        if file_size >= PDF_FILE_API_THRESHOLD_BYTES:
+            uploaded = client.files.upload(file=file_path)
+            for _ in range(90):
+                uploaded = client.files.get(name=uploaded.name)
+                state = getattr(uploaded, "state", None)
+                state_name = getattr(state, "name", str(state))
+                if state_name == "ACTIVE":
+                    break
+                if state_name == "FAILED":
+                    raise ValueError("Gemini could not process this PDF for text extraction")
+                time.sleep(2)
+            else:
+                raise ValueError("Timed out waiting for PDF text extraction")
+
+            response = client.models.generate_content(
+                model=model,
+                contents=[uploaded, prompt],
+            )
+        else:
+            with open(file_path, "rb") as handle:
+                pdf_bytes = handle.read()
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_bytes(
+                                data=pdf_bytes, mime_type="application/pdf"
+                            ),
+                            types.Part.from_text(text=prompt),
+                        ],
+                    )
                 ],
             )
-        ],
-    )
+    finally:
+        if uploaded is not None:
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass
+
     text = (getattr(response, "text", None) or "").strip()
     if text:
         logger.info("Gemini OCR extracted %s characters from %s", len(text), filename)

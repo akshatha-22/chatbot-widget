@@ -520,6 +520,7 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 ### Production notes
 
 - Set `SECRET_KEY`, `GEMINI_API_KEY`, and `DATABASE_URL` (PostgreSQL recommended) on **Railway**.
+- Do **not** set `EMBEDDING_MODEL=text-embedding-004` (retired). Omit it or use `gemini-embedding-001`.
 - Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
 - Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
 - Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
