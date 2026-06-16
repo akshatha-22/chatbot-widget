@@ -12,7 +12,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { streamSendMessage } from './streamSend'
-import { deleteFile, uploadFile } from '../../api/files'
+import { deleteFile, listFiles, uploadFile } from '../../api/files'
 import ChatInterface from './ChatInterface'
 import WidgetConversationDashboard from './WidgetConversationDashboard'
 import RemiAvatar2D from './RemiAvatar2D'
@@ -141,10 +141,17 @@ export default function ExpandedWidget({
     setFileUploadOpen(true)
   }
 
-  const handleUploadedFile = (uploaded: UploadedFile) => {
+  const handleUploadedFile = async (uploaded: UploadedFile) => {
     onFilesChange((prev) =>
       prev.some((f) => f.id === uploaded.id) ? prev : [...prev, uploaded],
     )
+    if (!conversation) return
+    try {
+      const refreshed = await listFiles(conversation.id)
+      onFilesChange(refreshed)
+    } catch {
+      // Keep optimistic entry; polling will retry while status is pending.
+    }
   }
 
   const handleDeleteFile = useCallback(

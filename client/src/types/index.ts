@@ -24,6 +24,7 @@ export interface UploadedFile {
   filename: string;
   status: 'pending' | 'processed' | 'failed';
   created_at: string;
+  processing_error?: string | null;
 }
 
 export interface User {

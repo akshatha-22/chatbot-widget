@@ -44,6 +44,7 @@ def apply_startup_migrations() -> None:
     _migrate_message_pdf_columns()
     _migrate_message_source_links_columns()
     _migrate_uploaded_file_vector_columns()
+    _migrate_uploaded_file_processing_error()
     _migrate_gemini_usage_index()
 
 
@@ -128,6 +129,22 @@ def _migrate_uploaded_file_vector_columns() -> None:
                 "ADD COLUMN IF NOT EXISTS raw_text_blob TEXT"
             )
     _run_alters(alters)
+
+
+def _migrate_uploaded_file_processing_error() -> None:
+    existing = _column_names("uploaded_files")
+    if not existing or "processing_error" in existing:
+        return
+
+    if _is_sqlite():
+        _run_alters(["ALTER TABLE uploaded_files ADD COLUMN processing_error TEXT"])
+    else:
+        _run_alters(
+            [
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS processing_error TEXT"
+            ]
+        )
 
 
 def _migrate_gemini_usage_index() -> None:

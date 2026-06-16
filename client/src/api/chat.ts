@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { authHeaders } from './authToken'
 import { readRateLimitFromResponse } from './rateLimit'
 import type { TMessageSource } from '../types/chat'
 
@@ -127,17 +128,13 @@ export async function streamMessage(
   handlers: StreamMessageHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('token')
   const url = `${API_BASE}/api/v1/chat/conversations/${conversationId}/messages/stream`
 
   let response: Response
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ content }),
       signal,
     })

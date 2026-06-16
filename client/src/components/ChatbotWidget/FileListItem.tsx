@@ -34,6 +34,7 @@ export default function FileListItem({
 
   const processed = file.status === 'processed'
   const failed = file.status === 'failed'
+  const failureDetail = file.processing_error?.trim()
 
   const handleConfirmDelete = async () => {
     setDeleting(true)
@@ -73,13 +74,20 @@ export default function FileListItem({
             <Check size={compact ? 11 : 14} /> Ready
           </p>
         ) : failed ? (
-          <p
-            className={`flex items-center gap-1 text-red-500 ${
-              compact ? 'text-[11px]' : 'text-xs'
-            }`}
-          >
-            <X size={compact ? 11 : 14} aria-hidden /> Failed — try again
-          </p>
+          <div>
+            <p
+              className={`flex items-center gap-1 text-red-500 ${
+                compact ? 'text-[11px]' : 'text-xs'
+              }`}
+            >
+              <X size={compact ? 11 : 14} aria-hidden /> Processing failed
+            </p>
+            {failureDetail && (
+              <p className={`mt-0.5 text-red-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+                {failureDetail}
+              </p>
+            )}
+          </div>
         ) : (
           <p
             className={`flex items-center gap-1 text-blue-500 ${
