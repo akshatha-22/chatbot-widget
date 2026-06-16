@@ -173,25 +173,28 @@ def test_reindex_file_queues_processing(
 ):
     from app.database.db import UploadedFile
 
-    monkeypatch.delenv("INLINE_FILE_PROCESSING", raising=False)
-
+    # Finish upload synchronously so no background embed thread is still running.
+    monkeypatch.setenv("INLINE_FILE_PROCESSING", "1")
     with patch("app.api.v1.files.vector_store_service.chunk_and_store"):
         upload = client.post(
             f"/api/v1/chat/conversations/{conversation_id}/files",
             headers=auth_headers,
             files={"file": ("notes.txt", io.BytesIO(b"reindex me"), "text/plain")},
         )
+    assert upload.status_code == 201
     file_id = upload.json()["id"]
     row = db_session.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     row.embedding_model_version = "old-version"
     row.status = "processed"
     db_session.commit()
 
+    # Reindex must queue background work — not run embedding inline.
+    monkeypatch.setenv("INLINE_FILE_PROCESSING", "0")
     with patch("app.api.v1.files._run_embedding_in_thread") as mock_thread:
         response = client.post(
             f"/api/v1/chat/conversations/{conversation_id}/files/{file_id}/reindex",
             headers=auth_headers,
         )
-    assert response.status_code == 200
-    assert response.json()["status"] == "pending"
-    mock_thread.assert_called_once()
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending"
+        mock_thread.assert_called_once()

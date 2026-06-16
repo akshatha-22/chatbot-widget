@@ -13,9 +13,11 @@ PAGE_MARKER_RE = re.compile(r"\[PAGE\s+\d+\]", re.IGNORECASE)
 MAX_PDF_OCR_BYTES = 100 * 1024 * 1024
 PDF_FILE_API_THRESHOLD_BYTES = 4 * 1024 * 1024
 MIN_TEXT_LENGTH = 20
-MAX_OCR_PAGES = 10
+# Process every page that still needs OCR after local extractors (flipbooks often need 100+).
+MAX_OCR_PAGES = 512
 MAX_CHARS_PER_PAGE = 3000
 PYMUPDF_MAX_WORKERS = 4
+OCR_MAX_WORKERS = 4
 
 ProgressCallback = Callable[[str], None]
 
@@ -186,6 +188,47 @@ def _truncate_dense_pages(all_pages: Dict[int, str]) -> None:
             )
 
 
+def _ocr_page_limit(total_pages: int, ocr_needed: int) -> int:
+    """How many pages to OCR — all candidates, bounded by doc size and safety cap."""
+    if ocr_needed <= 0:
+        return 0
+    return min(ocr_needed, total_pages, MAX_OCR_PAGES)
+
+
+def _gemini_ocr_pages_parallel(
+    file_path: str,
+    page_nums: List[int],
+    on_progress: Optional[ProgressCallback] = None,
+) -> Dict[int, str]:
+    """OCR multiple scanned pages in parallel with progress updates."""
+    if not page_nums:
+        return {}
+
+    results: Dict[int, str] = {}
+    total = len(page_nums)
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=OCR_MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_gemini_ocr_page, file_path, page_num): page_num
+            for page_num in page_nums
+        }
+        for future in as_completed(futures):
+            page_num = futures[future]
+            try:
+                text = future.result()
+            except Exception as exc:
+                logger.warning("Gemini OCR page %s failed: %s", page_num, exc)
+                text = ""
+            if text:
+                results[page_num] = text
+            completed += 1
+            if on_progress and (completed == 1 or completed == total or completed % 10 == 0):
+                on_progress(f"OCR page {completed} of {total}…")
+
+    return results
+
+
 def _gemini_ocr_page(file_path: str, page_num: int) -> str:
     """Use Gemini vision to OCR a single scanned page (last resort)."""
     from app.config import settings
@@ -329,25 +372,25 @@ def _extract_pdf_deep(
         except Exception as exc:
             logger.warning("PyPDF2 failed for %s: %s", filename, exc)
 
-    # Strategy 4 — Gemini OCR only for truly empty pages (hard cap)
+    # Strategy 4 — Gemini OCR for pages local extractors could not read
     ocr_candidates = _ocr_candidate_pages(all_pages, total_pages)
-    if ocr_candidates:
-        if len(ocr_candidates) > MAX_OCR_PAGES:
+    ocr_limit = _ocr_page_limit(total_pages, len(ocr_candidates))
+    if ocr_limit > 0:
+        pages_to_ocr = ocr_candidates[:ocr_limit]
+        if len(ocr_candidates) > ocr_limit:
             logger.warning(
-                "%s pages need OCR in %s but capping at %s. "
-                "Document may be a scanned image PDF.",
+                "%s pages need OCR in %s but capping at %s",
                 len(ocr_candidates),
                 filename,
-                MAX_OCR_PAGES,
+                ocr_limit,
             )
         if on_progress:
-            ocr_count = min(len(ocr_candidates), MAX_OCR_PAGES)
-            on_progress(f"OCR on {ocr_count} scanned page(s)…")
+            on_progress(f"OCR on {len(pages_to_ocr)} scanned page(s)…")
 
-        for page_num in ocr_candidates[:MAX_OCR_PAGES]:
-            text = _gemini_ocr_page(file_path, page_num)
-            if text:
-                all_pages[page_num] = text
+        for page_num, text in _gemini_ocr_pages_parallel(
+            file_path, pages_to_ocr, on_progress=on_progress
+        ).items():
+            all_pages[page_num] = text
 
     _truncate_dense_pages(all_pages)
 

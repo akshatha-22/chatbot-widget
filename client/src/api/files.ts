@@ -65,10 +65,3 @@ export const listFiles = async (conversationId: string) => {
 export const deleteFile = async (conversationId: string, fileId: string) => {
   await apiClient.delete(`/chat/conversations/${conversationId}/files/${fileId}`);
 };
-
-export const reindexFile = async (conversationId: string, fileId: string) => {
-  const { data } = await apiClient.post<UploadedFile>(
-    `/chat/conversations/${conversationId}/files/${fileId}/reindex`,
-  );
-  return data;
-};
