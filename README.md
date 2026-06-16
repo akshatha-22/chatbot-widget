@@ -6,8 +6,7 @@ A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI 
 **Live demo:** [chatbot-widget-client.vercel.app](https://chatbot-widget-client.vercel.app)  
 **API (Railway):** [chatbot-widgetclient-production.up.railway.app](https://chatbot-widgetclient-production.up.railway.app)
 
-
-This README reflects **what is in the repository today**, derived from the running code—not aspirational docs or empty scaffold folders.
+This README reflects **what is in the repository today**.
 
 ---
 

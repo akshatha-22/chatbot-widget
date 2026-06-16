@@ -25,8 +25,10 @@ def upgrade() -> None:
         "messages",
         sa.Column("links", sa.JSON(), server_default="[]", nullable=True),
     )
+    op.add_column("uploaded_files", sa.Column("raw_text_blob", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("uploaded_files", "raw_text_blob")
     op.drop_column("messages", "links")
     op.drop_column("messages", "source")

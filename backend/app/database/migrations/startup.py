@@ -119,6 +119,14 @@ def _migrate_uploaded_file_vector_columns() -> None:
                 "ALTER TABLE uploaded_files "
                 "ADD COLUMN IF NOT EXISTS embedding_model_version VARCHAR(100)"
             )
+    if "raw_text_blob" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE uploaded_files ADD COLUMN raw_text_blob TEXT")
+        else:
+            alters.append(
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS raw_text_blob TEXT"
+            )
     _run_alters(alters)
 
 

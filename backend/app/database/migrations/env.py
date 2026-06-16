@@ -13,7 +13,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 # Database
-from app.database.db import Base, Embedding  # noqa: F401 — register embeddings table, _engine_connect_args
+from app.database.db import Base, Embedding, _engine_connect_args  # noqa: F401
 
 # Register all ORM models on Base.metadata before autogenerate.
 from app.schemas import audit_log  # noqa: F401

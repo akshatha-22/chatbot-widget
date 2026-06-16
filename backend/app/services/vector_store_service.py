@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import List, Optional
 
 from sqlalchemy import text
@@ -125,6 +126,53 @@ def split_text(
     return chunks
 
 
+def _normalize_exact_key(value: str) -> str:
+    """Lowercase and strip hyphens, spaces, underscores for part-number matching."""
+    return re.sub(r"[\s\-_]+", "", (value or "").lower())
+
+
+def _exact_string_search_raw_text(raw_text: str, query: str) -> Optional[str]:
+    """
+    Find a chunk/line in raw_text whose normalized form contains the normalized query.
+    Returns the original segment text, or None.
+    """
+    if not raw_text or not query:
+        return None
+
+    normalized_query = _normalize_exact_key(query)
+    if not normalized_query:
+        return None
+
+    for segment in raw_text.split("\n"):
+        cleaned = segment.strip()
+        if not cleaned:
+            continue
+        if normalized_query in _normalize_exact_key(cleaned):
+            return cleaned
+
+    if normalized_query in _normalize_exact_key(raw_text):
+        for segment in raw_text.split("\n"):
+            cleaned = segment.strip()
+            if cleaned and normalized_query in _normalize_exact_key(cleaned):
+                return cleaned
+        return raw_text.strip()
+
+    return None
+
+
+def _persist_raw_text(
+    file_id: str, raw_text: Optional[str], db: Optional[Session] = None
+) -> None:
+    if not raw_text or db is None:
+        return
+    from app.database.db import UploadedFile
+
+    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if row:
+        row.raw_text_blob = raw_text
+        db.commit()
+
+
 def _is_index_stale(db: Session, file_id: str) -> bool:
     from app.database.db import UploadedFile
 
@@ -150,7 +198,14 @@ def reindex_file(db: Session, file_id: str) -> None:
     if not extracted_text or not extracted_text.strip():
         raise ValueError(f"No text extracted from {row.filename}")
 
-    chunk_and_store(file_id, extracted_text, db=db)
+    row_chunks = file_parser_service.parse_row_chunks(row.file_path, row.filename)
+    chunk_and_store(
+        file_id,
+        extracted_text,
+        db=db,
+        chunks=row_chunks,
+        raw_text=extracted_text,
+    )
     row.status = "processed"
     db.commit()
 
@@ -161,9 +216,12 @@ def chunk_and_store(
     db: Optional[Session] = None,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    *,
+    chunks: Optional[List[str]] = None,
+    raw_text: Optional[str] = None,
 ) -> bool:
     """
-    Chunk text, embed each chunk via Gemini, store in pgvector embeddings table.
+    Chunk text (or use pre-built row chunks), embed via Gemini, store in pgvector.
     Returns True on success, False on failure.
     """
     if db is None:
@@ -171,10 +229,12 @@ def chunk_and_store(
         return False
 
     try:
-        chunks = split_text(text, chunk_size, chunk_overlap)
-        if not chunks:
+        resolved_chunks = chunks if chunks is not None else split_text(text, chunk_size, chunk_overlap)
+        if not resolved_chunks:
             logger.warning("No chunks for file %s", file_id)
             return False
+
+        _persist_raw_text(file_id, raw_text or text, db)
 
         db.execute(
             text("DELETE FROM embeddings WHERE file_id = :fid"),
@@ -182,7 +242,7 @@ def chunk_and_store(
         )
 
         stored = 0
-        for index, chunk in enumerate(chunks):
+        for index, chunk in enumerate(resolved_chunks):
             embedding = _get_embedding(chunk)
             if not embedding:
                 logger.warning(
@@ -261,13 +321,21 @@ def search(
         return []
 
     try:
-        if db is not None:
-            for file_id in file_ids:
-                if _is_index_stale(db, file_id):
-                    try:
-                        reindex_file(db, file_id)
-                    except Exception as exc:
-                        logger.warning("Reindex failed for %s: %s", file_id, exc)
+        from app.database.db import UploadedFile
+
+        for file_id in file_ids:
+            if _is_index_stale(db, file_id):
+                try:
+                    reindex_file(db, file_id)
+                except Exception as exc:
+                    logger.warning("Reindex failed for %s: %s", file_id, exc)
+
+        for file_id in file_ids:
+            row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+            if row and row.raw_text_blob:
+                exact_hit = _exact_string_search_raw_text(row.raw_text_blob, query)
+                if exact_hit:
+                    return [exact_hit]
 
         exact = _exact_string_search(db, file_ids, query)
         if exact:
@@ -310,7 +378,7 @@ def _exact_string_search(
     file_ids: List[str],
     query: str,
 ) -> List[str]:
-    """Exact string match before semantic search."""
+    """Exact string match on stored chunks before semantic search."""
     try:
         normalized = query.lower().replace("-", "").replace(" ", "").strip()
         if not normalized:
