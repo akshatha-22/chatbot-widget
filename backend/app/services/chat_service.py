@@ -5,6 +5,7 @@ from app.database.db import Conversation, Message, UploadedFile
 from app.config import settings
 from app.core.sanitizer import sanitize_message
 from app.services import quota_service, response_cache, vector_store_service
+from app.services.rag_quality_service import RAGQuality, classify_rag_context
 from datetime import datetime
 import json
 import re
@@ -43,6 +44,13 @@ NOT_FOUND_MESSAGE = (
 PENDING_DOCUMENT_MESSAGE = (
     "Your document is still being processed. Please wait a moment and ask again."
 )
+
+CONVERSATIONAL_PATTERNS = [
+    r"^(hi|hello|hey|thanks|thank you|ok|okay|sure|great)",
+    r"^(what do you think|what is your opinion)",
+    r"^(tell me a joke|write me a|help me write)",
+    r"^(can you|could you|would you|please)",
+]
 
 def _gemini_models_to_try() -> List[str]:
     """Primary model from settings, then sensible fallbacks (gemini-pro is retired)."""
@@ -442,6 +450,117 @@ def _append_history_to_prompt(
         prompt += f"{msg.role.capitalize()}: {msg.content}\n"
     prompt += f"User: {user_message}\nAssistant:"
     return prompt
+
+
+def _is_conversational(query: str) -> bool:
+    """True if the query is general conversation that doesn't need web search."""
+    q = query.lower().strip()
+    return any(re.match(pattern, q) for pattern in CONVERSATIONAL_PATTERNS)
+
+
+def _build_prompt_and_search_flag(
+    rag_context: str, query: str
+) -> Tuple[str, bool, str]:
+    """
+    Returns: (prompt, use_search, source).
+    Never raises — falls back to web search on any internal error.
+    """
+    try:
+        quality = classify_rag_context(rag_context, query)
+
+        if quality == RAGQuality.DIRECT:
+            return (
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
+
+{MARKDOWN_INSTRUCTION}
+
+DOCUMENT CONTENT (extracted from user's file):
+═══════════════════════════════════════════════
+{rag_context}
+═══════════════════════════════════════════════
+
+User question: {query}
+
+Answer using ONLY the document content above.
+Quote specific details. Reference page numbers using [Page X] markers when relevant.""",
+                False,
+                "document",
+            )
+
+        if quality == RAGQuality.PARTIAL:
+            return (
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
+
+{MARKDOWN_INSTRUCTION}
+
+DOCUMENT CONTENT (extracted from user's file):
+═══════════════════════════════════════════════
+{rag_context}
+═══════════════════════════════════════════════
+
+The document has partial information.
+First answer from the document content above, labeled "From your document:".
+Then supplement with web search results, labeled "From the web:".
+
+User question: {query}""",
+                True,
+                "both",
+            )
+
+        if quality == RAGQuality.DEFLECTED:
+            return (
+                f"""{DOCUMENT_ACCESS_OVERRIDE}
+
+NOTE: The document contains disclaimers instead of direct answers.
+Do NOT repeat these disclaimers.
+Search the web and provide a direct, useful answer.
+Begin with: "Your document doesn't cover this specifically — here's what I found online:"
+
+{MARKDOWN_INSTRUCTION}
+
+User question: {query}""",
+                True,
+                "web",
+            )
+
+        return (
+            f"""You are Remi, a helpful assistant.
+
+The uploaded document has no relevant information
+about this topic. Search the web and provide a
+thorough, helpful answer with specific details.
+
+Begin with: "This isn't in your uploaded document —
+here's what I found online:"
+
+{MARKDOWN_INSTRUCTION}
+
+Question: {query}""",
+            True,
+            "web",
+        )
+    except Exception:
+        return (
+            f"""You are Remi, a helpful assistant.
+Search the web and answer the question thoroughly.
+
+{MARKDOWN_INSTRUCTION}
+
+Question: {query}""",
+            True,
+            "web",
+        )
+
+
+def _resolve_use_search(
+    db: Session, conversation_id: int, rag_context: str, user_message: str
+) -> bool:
+    if _has_pending_files(db, conversation_id):
+        return False
+    if not _has_uploaded_files(db, conversation_id):
+        return not _is_conversational(user_message)
+    _, use_search, _ = _build_prompt_and_search_flag(rag_context, user_message)
+    return use_search
 
 
 def _resolve_retrieval_path(
