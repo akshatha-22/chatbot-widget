@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 EMBEDDING_VERSION = "gemini-embedding-001-v768"
 EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 100
-MAX_CHUNKS_PER_FILE = 400
+MAX_CHUNKS_PER_FILE = 2000
 PAGE_QUERY_TOP_K = 15
 PAGE_MARKER_PATTERN = re.compile(r"\[PAGE (\d+)\]", re.IGNORECASE)
 
@@ -240,6 +240,33 @@ def split_text_with_pages(
     return chunks
 
 
+def _collapse_to_one_chunk_per_page(chunks: List[dict]) -> List[dict]:
+    """Merge multiple chunks from the same page into a single indexed chunk."""
+    by_page: dict[int, dict] = {}
+    for chunk in chunks:
+        page = int(chunk.get("page") or 1)
+        text = (chunk.get("text") or "").strip()
+        if not text:
+            continue
+        if page not in by_page:
+            by_page[page] = {
+                "text": text,
+                "page": page,
+                "chunk_index": len(by_page),
+            }
+            continue
+        existing = by_page[page]["text"]
+        marker = f"[Page {page}]"
+        body = text[len(marker):].strip() if text.startswith(marker) else text
+        if body and body not in existing:
+            by_page[page]["text"] = f"{existing}\n\n{body}".strip()
+
+    return [
+        by_page[page]
+        for page in sorted(by_page)
+    ]
+
+
 def _extract_page_number(query: str) -> int | None:
     """Detect page number references in a user query."""
     patterns = [
@@ -296,6 +323,19 @@ def _resolve_index_chunks(
                 split_text(source_text, chunk_size, chunk_overlap)
             )
         ]
+
+    if len(resolved) <= MAX_CHUNKS_PER_FILE:
+        return resolved
+
+    if PAGE_MARKER_PATTERN.search(source_text):
+        collapsed = _collapse_to_one_chunk_per_page(resolved)
+        if len(collapsed) < len(resolved):
+            logger.info(
+                "Collapsed page chunks from %s to %s (one chunk per page)",
+                len(resolved),
+                len(collapsed),
+            )
+            resolved = collapsed
 
     if len(resolved) <= MAX_CHUNKS_PER_FILE:
         return resolved

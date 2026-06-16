@@ -103,7 +103,7 @@ def test_non_pdf_returns_page_one_marker(tmp_path):
     assert "Hello world" in text
 
 
-def test_ocr_capped_at_max_pages(tmp_path, monkeypatch):
+def test_ocr_processes_all_candidate_pages(tmp_path, monkeypatch):
     path = _make_pdf(tmp_path, [f"Page {i}" for i in range(1, 16)], "big.pdf")
     monkeypatch.setattr(file_parser_service, "_get_pdf_page_count", lambda p: 15)
 
@@ -119,7 +119,7 @@ def test_ocr_capped_at_max_pages(tmp_path, monkeypatch):
                 ) as mock_ocr:
                     file_parser_service._extract_pdf_deep(path, "big.pdf")
 
-    assert mock_ocr.call_count == file_parser_service.MAX_OCR_PAGES
+    assert mock_ocr.call_count == 15
 
 
 def test_page_truncation_at_max_chars(tmp_path, monkeypatch):

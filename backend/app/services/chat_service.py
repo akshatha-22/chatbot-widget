@@ -660,13 +660,13 @@ def _page_not_found_message(
     max_page = vector_store_service.get_max_page_number(db, file_ids)
     msg = (
         f"I couldn't find page {page_num} in your uploaded document. "
-        "Try a different page number or re-index the file."
+        "Try a different page number."
     )
     if max_page > 0:
         msg = (
             f"I couldn't find page {page_num} in your uploaded document. "
             f"The indexed content covers pages 1–{max_page}. "
-            "Try a different page number or re-index the file."
+            "Try a different page number."
         )
     return msg
 
@@ -1303,7 +1303,7 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
         if not searchable:
             print(
                 f"[RAG] {len(files)} processed file(s) but none have searchable embeddings "
-                "(re-upload or re-index required)"
+                "(re-upload required)"
             )
             return ""
 
