@@ -13,6 +13,17 @@ const FILE_TYPE_COLORS: Record<string, string> = {
   md: '#8C8C8C',
 }
 
+const STATUS_CONFIG: Record<
+  UploadedFile['status'],
+  { label: string; color: string; pulse: boolean }
+> = {
+  pending: { label: 'Uploading…', color: '#888888', pulse: true },
+  extracting: { label: 'Reading pages…', color: '#2979FF', pulse: true },
+  embedding: { label: 'Indexing content…', color: '#2979FF', pulse: true },
+  processed: { label: 'Ready', color: '#22C55E', pulse: false },
+  failed: { label: 'Failed — try re-uploading', color: '#EF4444', pulse: false },
+}
+
 function fileIconColor(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() ?? ''
   return FILE_TYPE_COLORS[ext] ?? '#8C8C8C'
@@ -21,19 +32,36 @@ function fileIconColor(filename: string): string {
 type FileListItemProps = {
   file: UploadedFile
   onDelete: (fileId: string) => Promise<void>
+  onReindex?: (fileId: string) => Promise<void>
   compact?: boolean
 }
 
 export default function FileListItem({
   file,
   onDelete,
+  onReindex,
   compact = false,
 }: FileListItemProps) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [reindexing, setReindexing] = useState(false)
 
+  const status = STATUS_CONFIG[file.status] ?? STATUS_CONFIG.pending
   const processed = file.status === 'processed'
   const failed = file.status === 'failed'
+  const inProgress = status.pulse
+  const stale = processed && Boolean(file.stale)
+  const failureDetail = file.processing_error?.trim()
+
+  const handleReindex = async () => {
+    if (!onReindex) return
+    setReindexing(true)
+    try {
+      await onReindex(file.id)
+    } finally {
+      setReindexing(false)
+    }
+  }
 
   const handleConfirmDelete = async () => {
     setDeleting(true)
@@ -65,32 +93,61 @@ export default function FileListItem({
           {file.filename}
         </p>
         {processed ? (
-          <p
-            className={`flex items-center gap-1 text-[#22C55E] ${
-              compact ? 'text-[11px]' : 'text-xs'
-            }`}
-          >
-            <Check size={compact ? 11 : 14} /> Ready
-          </p>
+          <div>
+            <p
+              className={`flex items-center gap-1 ${
+                compact ? 'text-[11px]' : 'text-xs'
+              }`}
+              style={{ color: status.color }}
+            >
+              <Check size={compact ? 11 : 14} /> {status.label}
+            </p>
+            {stale && (
+              <div className={`mt-1 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+                <p className="text-amber-600">Re-index for page search</p>
+                {onReindex && (
+                  <button
+                    type="button"
+                    onClick={handleReindex}
+                    disabled={reindexing}
+                    className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-800 disabled:opacity-50"
+                  >
+                    {reindexing ? 'Re-indexing…' : 'Re-index'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         ) : failed ? (
-          <p
-            className={`flex items-center gap-1 text-red-500 ${
-              compact ? 'text-[11px]' : 'text-xs'
-            }`}
-          >
-            <X size={compact ? 11 : 14} aria-hidden /> Failed — try again
-          </p>
+          <div>
+            <p
+              className={`flex items-center gap-1 ${
+                compact ? 'text-[11px]' : 'text-xs'
+              }`}
+              style={{ color: status.color }}
+            >
+              <X size={compact ? 11 : 14} aria-hidden /> {status.label}
+            </p>
+            {failureDetail && (
+              <p className={`mt-0.5 text-red-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+                {failureDetail}
+              </p>
+            )}
+          </div>
         ) : (
           <p
-            className={`flex items-center gap-1 text-blue-500 ${
+            className={`flex items-center gap-1 ${
               compact ? 'text-[11px]' : 'text-xs'
             }`}
+            style={{ color: status.color }}
           >
-            <span
-              className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"
-              aria-hidden
-            />
-            Processing…
+            {inProgress && (
+              <span
+                className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+                aria-hidden
+              />
+            )}
+            {status.label}
           </p>
         )}
         {confirming && (

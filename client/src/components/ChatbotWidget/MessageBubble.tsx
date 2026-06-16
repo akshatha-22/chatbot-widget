@@ -35,8 +35,8 @@ const SOURCE_CONFIG: Record<
   },
 }
 
-function normalizeSource(source?: string): TMessageSource | null {
-  if (!source) return null
+function normalizeSource(source?: string | null): TMessageSource | null {
+  if (source == null) return null
   if (source === 'catalog') return 'document'
   if (source in SOURCE_CONFIG) return source as TMessageSource
   return null
@@ -67,16 +67,17 @@ export default function MessageBubble({
         </button>
       )}
 
-      {source && (
+      {source != null && (
         <>
           <div
             className="remi-source-badge"
             style={{ color: SOURCE_CONFIG[source].color }}
           >
-            {SOURCE_CONFIG[source].icon} {SOURCE_CONFIG[source].label}
+            <span>{SOURCE_CONFIG[source].icon}</span>
+            <span>{SOURCE_CONFIG[source].label}</span>
           </div>
 
-          {['web', 'both'].includes(source) && links.length > 0 && (
+          {(source === 'web' || source === 'both') && links.length > 0 && (
             <div className="remi-external-links">
               <p className="remi-links-header">Sources</p>
               <ul className="remi-links-list">

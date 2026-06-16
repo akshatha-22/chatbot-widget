@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Maximize2, Minus, X, Paperclip, Send, Mic, LogOut } from 'lucide-react'
 import { streamSendMessage } from './streamSend'
+import { listFiles } from '../../api/files'
 import type { Message, Conversation, UploadedFile } from '../../types'
 import { generatePDFFromContent } from '../../utils/pdfGenerator'
 import FileUploadModal from './FileUploadModal'
@@ -314,10 +315,16 @@ export default function CompactWidget({
           conversationId={conversation.id}
           files={files}
           onClose={() => setFileUploadOpen(false)}
-          onUploaded={(uploaded) => {
+          onUploaded={async (uploaded) => {
             onFilesChange((prev) =>
               prev.some((f) => f.id === uploaded.id) ? prev : [...prev, uploaded],
             )
+            try {
+              const refreshed = await listFiles(conversation.id)
+              onFilesChange(refreshed)
+            } catch {
+              /* polling will retry */
+            }
           }}
         />
       )}

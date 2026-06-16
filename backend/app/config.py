@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     # LLM Settings
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Default embedding model — validator maps retired names (e.g. text-embedding-004) here.
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-3.5-turbo"
 
@@ -166,6 +168,26 @@ class Settings(BaseSettings):
         if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
             return s[1:-1].strip()
         return s
+
+    @field_validator("EMBEDDING_MODEL", mode="before")
+    @classmethod
+    def normalize_embedding_model(cls, v: object) -> str:
+        """Map retired Gemini embedding model names to gemini-embedding-001."""
+        if not isinstance(v, str):
+            return "gemini-embedding-001"
+        model = v.strip().removeprefix("models/")
+        retired = {
+            "",
+            "text-embedding-004",
+            "text-embedding-005",
+            "embedding-001",
+        }
+        if model in retired:
+            return "gemini-embedding-001"
+        allowed = {"gemini-embedding-001"}
+        if model not in allowed:
+            return "gemini-embedding-001"
+        return model
 
     def gemini_configured(self) -> bool:
         return bool((self.GEMINI_API_KEY or "").strip())

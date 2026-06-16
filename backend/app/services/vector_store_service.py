@@ -1,88 +1,327 @@
-import logging
-import os
-import pickle
-import re
-import tempfile
-from typing import List, Optional, Tuple
+"""
+Vector store service — Gemini embeddings + pgvector.
+Replaces FAISS + sentence-transformers stack.
+Zero in-memory model loading — all search in PostgreSQL.
+"""
 
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import List, Optional
+
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-EMBEDDING_MODEL_VERSION = f"{EMBEDDING_MODEL_NAME}-v1.0"
-
-# Define storage directory for vector store indices (legacy disk fallback)
-VECTOR_STORE_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "vector_store")
-)
-
-_model = None
-_index_memory_cache: dict[str, Tuple[Optional[object], List[str]]] = {}
+EMBEDDING_VERSION = "gemini-embedding-001-v768"
+EMBEDDING_DIMENSIONS = 768
+EMBED_BATCH_SIZE = 100
+MAX_CHUNKS_PER_FILE = 400
+PAGE_QUERY_TOP_K = 15
+PAGE_MARKER_PATTERN = re.compile(r"\[PAGE (\d+)\]", re.IGNORECASE)
 
 
-def ml_stack_available() -> bool:
-    """True when FAISS + sentence-transformers can be imported."""
-    try:
-        import faiss  # noqa: F401
-        import numpy  # noqa: F401
-        from sentence_transformers import SentenceTransformer  # noqa: F401
+def _embed_config(*, query: bool = False):
+    from google.genai import types
 
-        return True
-    except ImportError:
-        return False
+    return types.EmbedContentConfig(
+        task_type="RETRIEVAL_QUERY" if query else "RETRIEVAL_DOCUMENT",
+        output_dimensionality=EMBEDDING_DIMENSIONS,
+    )
 
 
 def get_current_embedding_model_version() -> str:
-    return EMBEDDING_MODEL_VERSION
+    return EMBEDDING_VERSION
 
 
-def get_embedding_model():
-    """Lazily load the SentenceTransformer model (avoids import at startup / in CI)."""
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-
-        _model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    return _model
+def gemini_embeddings_available() -> bool:
+    return settings.gemini_configured()
 
 
-def _is_index_stale(db: Session, file_id: str) -> bool:
-    from app.database.db import UploadedFile
+def clear_memory_cache(file_id: Optional[str] = None) -> None:
+    """No-op — kept for backward compatibility with older tests/callers."""
 
-    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-    if not row:
+
+def _genai_client():
+    from google import genai
+
+    return genai.Client(api_key=settings.GEMINI_API_KEY.strip())
+
+
+def _embedding_model_id() -> str:
+    return settings.EMBEDDING_MODEL.removeprefix("models/")
+
+
+def _embedding_models_to_try() -> List[str]:
+    primary = _embedding_model_id()
+    models = [primary]
+    for fallback in ("gemini-embedding-001",):
+        if fallback not in models:
+            models.append(fallback)
+    return models
+
+
+def _format_pgvector(values: List[float]) -> str:
+    return "[" + ",".join(str(v) for v in values) + "]"
+
+
+def _ensure_genai_configured() -> bool:
+    return settings.gemini_configured()
+
+
+def _extract_embedding_values(response) -> List[float]:
+    embeddings = getattr(response, "embeddings", None) or []
+    if not embeddings:
+        return []
+    values = getattr(embeddings[0], "values", None)
+    return list(values) if values else []
+
+
+def _extract_batch_embeddings(response) -> List[List[float]]:
+    embeddings = getattr(response, "embeddings", None) or []
+    out: List[List[float]] = []
+    for item in embeddings:
+        values = getattr(item, "values", None)
+        out.append(list(values) if values else [])
+    return out
+
+
+def _get_embeddings_batch(
+    chunks: List[str], batch_size: int = EMBED_BATCH_SIZE
+) -> List[List[float]]:
+    """
+    Embed many chunks via Gemini batch API (fewer round-trips than one-by-one).
+    Returns one vector per input chunk; failed slots are empty lists.
+    """
+    if not chunks:
+        return []
+    if not _ensure_genai_configured():
+        return [[] for _ in chunks]
+
+    results: List[List[float]] = []
+    client = _genai_client()
+    config = _embed_config()
+    last_error: Exception | None = None
+
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start : start + batch_size]
+        batch_vectors: List[List[float]] = []
+        for model_id in _embedding_models_to_try():
+            try:
+                response = client.models.embed_content(
+                    model=model_id,
+                    contents=batch,
+                    config=config,
+                )
+                batch_vectors = _extract_batch_embeddings(response)
+                if batch_vectors and any(batch_vectors):
+                    break
+            except Exception as exc:
+                last_error = exc
+                logger.error("Gemini batch embedding failed (%s): %s", model_id, exc)
+
+        if len(batch_vectors) != len(batch):
+            batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
+        if not any(batch_vectors) and last_error is not None:
+            logger.error("All embedding models failed for batch starting at %s", start)
+        results.extend(batch_vectors[: len(batch)])
+
+    return results
+
+
+def _get_embedding(text_input: str) -> List[float]:
+    """
+    Get embedding vector from Gemini API.
+    Returns list of 768 floats.
+    Never raises — returns empty list on failure.
+    """
+    try:
+        if not _ensure_genai_configured():
+            return []
+        response = _genai_client().models.embed_content(
+            model=_embedding_model_id(),
+            contents=text_input,
+            config=_embed_config(),
+        )
+        return _extract_embedding_values(response)
+    except Exception as exc:
+        logger.error("Gemini embedding failed: %s", exc)
+        return []
+
+
+def _get_query_embedding(query: str) -> List[float]:
+    """Get embedding for search query (retrieval_query task type)."""
+    try:
+        if not _ensure_genai_configured():
+            return []
+        response = _genai_client().models.embed_content(
+            model=_embedding_model_id(),
+            contents=query,
+            config=_embed_config(query=True),
+        )
+        return _extract_embedding_values(response)
+    except Exception as exc:
+        logger.error("Gemini query embedding failed: %s", exc)
+        return []
+
+
+def _is_postgres(db: Session) -> bool:
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except Exception:
         return False
-    if not row.embedding_model_version:
-        return bool(row.chunks_blob or row.faiss_index_blob)
-    return row.embedding_model_version != get_current_embedding_model_version()
 
 
-def reindex_file(db: Session, file_id: str) -> None:
-    """Re-embed a file when the stored FAISS index version is stale."""
-    from app.database.db import UploadedFile
-    from app.services import file_parser_service
+def split_text(
+    text: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
+) -> List[str]:
+    """Split text into overlapping chunks."""
+    if not text or not text.strip():
+        return []
 
-    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-    if not row or not row.file_path:
-        return
+    chunks: List[str] = []
+    start = 0
+    cleaned = text.strip()
 
-    logger.warning("FAISS index version mismatch for file %s — reindexing", file_id)
-    clear_memory_cache(file_id)
-    extracted_text = file_parser_service.extract_text(row.file_path, row.filename)
-    if not extracted_text or not extracted_text.strip():
-        raise ValueError(f"No text extracted from {row.filename}")
+    while start < len(cleaned):
+        end = start + chunk_size
+        chunk = cleaned[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        start += max(chunk_size - chunk_overlap, 1)
 
-    row_chunks = file_parser_service.parse_row_chunks(row.file_path, row.filename)
-    chunk_and_store(
-        file_id,
-        extracted_text,
-        db=db,
-        chunks=row_chunks,
-        raw_text=extracted_text,
+    return chunks
+
+
+def split_text_with_pages(
+    text: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
+) -> List[dict]:
+    """
+    Split page-aware text into chunks.
+    Each chunk dict has text, page, and chunk_index.
+    """
+    chunks: List[dict] = []
+    chunk_index = 0
+    parts = PAGE_MARKER_PATTERN.split(text)
+
+    i = 1
+    while i < len(parts) - 1:
+        page_num = int(parts[i])
+        page_content = parts[i + 1].strip()
+        i += 2
+
+        if not page_content:
+            continue
+
+        start = 0
+        while start < len(page_content):
+            end = start + chunk_size
+            chunk_text = page_content[start:end].strip()
+            if chunk_text:
+                chunks.append(
+                    {
+                        "text": f"[Page {page_num}] {chunk_text}",
+                        "page": page_num,
+                        "chunk_index": chunk_index,
+                    }
+                )
+                chunk_index += 1
+            start += max(chunk_size - chunk_overlap, 1)
+
+    return chunks
+
+
+def _extract_page_number(query: str) -> int | None:
+    """Detect page number references in a user query."""
+    patterns = [
+        r"page\s+number\s+(\d+)",
+        r"page\s*[\.\#]?\s*(\d+)",
+        r"p\.\s*(\d+)",
+        r"pg\s*\.?\s*(\d+)",
+    ]
+    lowered = query.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _resolve_index_chunks(
+    source_text: str,
+    chunks: Optional[List[str]],
+    chunk_size: int,
+    chunk_overlap: int,
+) -> List[dict]:
+    """Cap chunk count so large PDFs finish within Railway timeouts."""
+    if chunks is not None:
+        resolved = [
+            {
+                "text": f"[Page 1] {chunk}",
+                "page": 1,
+                "chunk_index": index,
+            }
+            for index, chunk in enumerate(chunks)
+            if chunk.strip()
+        ]
+    elif PAGE_MARKER_PATTERN.search(source_text):
+        resolved = split_text_with_pages(source_text, chunk_size, chunk_overlap)
+    else:
+        resolved = [
+            {
+                "text": f"[Page 1] {chunk}",
+                "page": 1,
+                "chunk_index": index,
+            }
+            for index, chunk in enumerate(
+                split_text(source_text, chunk_size, chunk_overlap)
+            )
+        ]
+
+    if len(resolved) <= MAX_CHUNKS_PER_FILE:
+        return resolved
+
+    if chunks is not None:
+        logger.warning(
+            "Capping row chunks from %s to %s for indexing",
+            len(resolved),
+            MAX_CHUNKS_PER_FILE,
+        )
+        return resolved[:MAX_CHUNKS_PER_FILE]
+
+    size = chunk_size
+    while len(resolved) > MAX_CHUNKS_PER_FILE and size < 8000:
+        size = int(size * 1.5)
+        if PAGE_MARKER_PATTERN.search(source_text):
+            resolved = split_text_with_pages(source_text, size, chunk_overlap)
+        else:
+            resolved = [
+                {
+                    "text": f"[Page 1] {chunk}",
+                    "page": 1,
+                    "chunk_index": index,
+                }
+                for index, chunk in enumerate(
+                    split_text(source_text, size, chunk_overlap)
+                )
+            ]
+    if len(resolved) > MAX_CHUNKS_PER_FILE:
+        resolved = resolved[:MAX_CHUNKS_PER_FILE]
+    logger.info(
+        "Reduced chunk count to %s for indexing (chunk_size=%s)",
+        len(resolved),
+        size,
     )
-    row.status = "processed"
-    db.commit()
+    return resolved
 
 
 def _normalize_exact_key(value: str) -> str:
@@ -90,7 +329,7 @@ def _normalize_exact_key(value: str) -> str:
     return re.sub(r"[\s\-_]+", "", (value or "").lower())
 
 
-def _exact_string_search(raw_text: str, query: str) -> Optional[str]:
+def _exact_string_search_raw_text(raw_text: str, query: str) -> Optional[str]:
     """
     Find a chunk/line in raw_text whose normalized form contains the normalized query.
     Returns the original segment text, or None.
@@ -129,262 +368,162 @@ def _persist_raw_text(
     row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     if row:
         row.raw_text_blob = raw_text
-        db.commit()
+        db.flush()
 
 
-def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
-    """Splits document text into clean, smaller chunks using paragraphs/sentences."""
-    if not text:
-        return []
-
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk = ""
-
-    for paragraph in paragraphs:
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-
-        if len(current_chunk) + len(paragraph) <= chunk_size:
-            if current_chunk:
-                current_chunk += "\n\n" + paragraph
-            else:
-                current_chunk = paragraph
-        else:
-            if current_chunk:
-                chunks.append(current_chunk)
-
-            if len(paragraph) > chunk_size:
-                sentences = paragraph.split(". ")
-                sub_chunk = ""
-                for sentence in sentences:
-                    sentence = sentence.strip()
-                    if not sentence:
-                        continue
-                    if len(sub_chunk) + len(sentence) <= chunk_size:
-                        if sub_chunk:
-                            sub_chunk += ". " + sentence
-                        else:
-                            sub_chunk = sentence
-                    else:
-                        if sub_chunk:
-                            chunks.append(sub_chunk)
-                        sub_chunk = sentence
-                if sub_chunk:
-                    current_chunk = sub_chunk
-            else:
-                current_chunk = paragraph
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    return chunks
-
-
-def _serialize_faiss_index(index) -> bytes:
-    import faiss
-
-    fd, path = tempfile.mkstemp(suffix=".index")
-    os.close(fd)
-    try:
-        faiss.write_index(index, path)
-        with open(path, "rb") as f:
-            return f.read()
-    finally:
-        os.unlink(path)
-
-
-def _deserialize_faiss_index(data: bytes):
-    import faiss
-
-    fd, path = tempfile.mkstemp(suffix=".index")
-    os.close(fd)
-    try:
-        with open(path, "wb") as f:
-            f.write(data)
-        return faiss.read_index(path)
-    finally:
-        os.unlink(path)
-
-
-def _persist_chunks_to_disk(file_id: str, chunks: List[str]) -> None:
-    os.makedirs(VECTOR_STORE_DIR, exist_ok=True)
-    chunks_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.chunks")
-    with open(chunks_path, "wb") as f:
-        pickle.dump(chunks, f)
-
-
-def _persist_to_disk(file_id: str, index, chunks: List[str]) -> None:
-    import faiss
-
-    os.makedirs(VECTOR_STORE_DIR, exist_ok=True)
-    index_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.index")
-    chunks_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.chunks")
-    faiss.write_index(index, index_path)
-    with open(chunks_path, "wb") as f:
-        pickle.dump(chunks, f)
-
-
-def _load_from_disk(file_id: str) -> Tuple[Optional[object], Optional[List[str]]]:
-    chunks_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.chunks")
-    index_path = os.path.join(VECTOR_STORE_DIR, f"{file_id}.index")
-
-    if not os.path.exists(chunks_path):
-        return None, None
-
-    with open(chunks_path, "rb") as f:
-        chunks = pickle.load(f)
-
-    index = None
-    if os.path.exists(index_path):
-        import faiss
-
-        index = faiss.read_index(index_path)
-
-    return index, chunks
-
-
-def _load_from_db(db: Session, file_id: str) -> Tuple[Optional[object], Optional[List[str]]]:
+def _is_index_stale(db: Session, file_id: str) -> bool:
     from app.database.db import UploadedFile
 
     row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-    if not row or not row.chunks_blob:
-        return None, None
-
-    chunks = pickle.loads(row.chunks_blob)
-    index = None
-    if row.faiss_index_blob:
-        index = _deserialize_faiss_index(row.faiss_index_blob)
-    return index, chunks
+    if not row:
+        return False
+    if not row.embedding_model_version:
+        return True
+    return row.embedding_model_version != EMBEDDING_VERSION
 
 
-def _load_vectors(
-    file_id: str, db: Optional[Session] = None
-) -> Tuple[Optional[object], Optional[List[str]]]:
-    """Load FAISS index + chunks: memory cache → DB blob → disk."""
-    if file_id in _index_memory_cache:
-        return _index_memory_cache[file_id]
-
-    index, chunks = None, None
-
-    if db is not None:
-        index, chunks = _load_from_db(db, file_id)
-
-    if chunks is None:
-        index, chunks = _load_from_disk(file_id)
-
-    if chunks is not None:
-        _index_memory_cache[file_id] = (index, chunks)
-
-    return index, chunks
-
-
-def _store_chunks_only(
-    file_id: str, chunks: List[str], db: Optional[Session] = None
-) -> None:
-    """Persist text chunks without vector embeddings (dev fallback)."""
+def reindex_file(db: Session, file_id: str) -> None:
+    """Re-embed a file when the stored embedding version is stale."""
     from app.database.db import UploadedFile
+    from app.services import file_parser_service
 
-    chunks_blob = pickle.dumps(chunks)
+    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not row or not row.file_path:
+        return
 
-    if db is not None:
-        row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-        if row:
-            row.chunks_blob = chunks_blob
-            row.faiss_index_blob = None
-            row.embedding_model_version = get_current_embedding_model_version()
-            db.commit()
+    logger.warning("Embedding version mismatch for file %s — reindexing", file_id)
+    extracted_text = file_parser_service.extract_text(row.file_path, row.filename)
+    if not extracted_text or not extracted_text.strip():
+        raise ValueError(f"No text extracted from {row.filename}")
 
-    _persist_chunks_to_disk(file_id, chunks)
-    _index_memory_cache[file_id] = (None, chunks)
-
-
-def _simple_chunk_search(chunks: List[str], query: str, top_k: int) -> List[str]:
-    """Keyword overlap search when FAISS / embeddings are unavailable."""
-    query_lower = query.lower().strip()
-    if not query_lower:
-        return chunks[:top_k]
-
-    terms = [t for t in re.split(r"\W+", query_lower) if len(t) > 2]
-    scored: list[tuple[str, float]] = []
-
-    for chunk in chunks:
-        chunk_lower = chunk.lower()
-        score = 0.0
-        if query_lower in chunk_lower:
-            score += 10.0
-        for term in terms:
-            if term in chunk_lower:
-                score += 1.0
-        if score > 0:
-            scored.append((chunk, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [chunk for chunk, _ in scored[:top_k]]
-
-
-def _chunk_and_store_with_faiss(
-    file_id: str, chunks: List[str], db: Optional[Session] = None
-) -> None:
-    import faiss
-    import numpy as np
-
-    from app.database.db import UploadedFile
-
-    model = get_embedding_model()
-    embeddings = model.encode(chunks)
-    dimension = embeddings.shape[1]
-
-    index = faiss.IndexFlatL2(dimension)
-    index.add(np.array(embeddings).astype("float32"))
-
-    index_blob = _serialize_faiss_index(index)
-    chunks_blob = pickle.dumps(chunks)
-
-    if db is not None:
-        row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
-        if row:
-            row.faiss_index_blob = index_blob
-            row.chunks_blob = chunks_blob
-            row.embedding_model_version = get_current_embedding_model_version()
-            db.commit()
-
-    _persist_to_disk(file_id, index, chunks)
-    _index_memory_cache[file_id] = (index, chunks)
+    row_chunks = file_parser_service.parse_row_chunks(row.file_path, row.filename)
+    chunk_and_store(
+        file_id,
+        extracted_text,
+        db=db,
+        chunks=row_chunks,
+        raw_text=extracted_text,
+    )
+    row.status = "processed"
+    db.commit()
 
 
 def chunk_and_store(
     file_id: str,
-    text: str,
+    source_text: str,
     db: Optional[Session] = None,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 100,
     *,
     chunks: Optional[List[str]] = None,
     raw_text: Optional[str] = None,
-):
-    """Split text (or use pre-built row chunks), embed when possible, and persist."""
-    resolved_chunks = chunks if chunks is not None else split_text(text)
-    if not resolved_chunks:
-        raise ValueError("No indexable text chunks after splitting document")
-
-    _persist_raw_text(file_id, raw_text or text, db)
-
-    if not ml_stack_available():
-        print(
-            "[EMBED] FAISS/sentence-transformers not installed — "
-            "storing text chunks with keyword search fallback"
-        )
-        _store_chunks_only(file_id, resolved_chunks, db)
-        return
+) -> bool:
+    """
+    Chunk text (or use pre-built row chunks), embed via Gemini, store in pgvector.
+    Returns True on success, False on failure.
+    """
+    if db is None:
+        logger.error("chunk_and_store requires a database session")
+        return False
 
     try:
-        _chunk_and_store_with_faiss(file_id, resolved_chunks, db)
-    except ImportError as exc:
-        print(f"[EMBED] Embedding import failed ({exc}) — using text-only fallback")
-        _store_chunks_only(file_id, resolved_chunks, db)
+        resolved_chunks = _resolve_index_chunks(
+            source_text, chunks, chunk_size, chunk_overlap
+        )
+        if not resolved_chunks:
+            raise ValueError("No text chunks to index from this file")
+
+        _persist_raw_text(file_id, raw_text or source_text, db)
+
+        db.execute(
+            text("DELETE FROM embeddings WHERE file_id = :fid"),
+            {"fid": file_id},
+        )
+
+        embeddings = _get_embeddings_batch([chunk["text"] for chunk in resolved_chunks])
+        pg_insert = text(
+            """
+            INSERT INTO embeddings
+            (file_id, chunk_text, embedding, chunk_index, page)
+            VALUES (:file_id, :chunk_text, CAST(:embedding AS vector), :chunk_index, :page)
+            """
+        )
+        sqlite_insert = text(
+            """
+            INSERT INTO embeddings
+            (file_id, chunk_text, embedding, chunk_index, page)
+            VALUES (:file_id, :chunk_text, :embedding, :chunk_index, :page)
+            """
+        )
+
+        insert_rows: list[dict] = []
+        for chunk, embedding in zip(resolved_chunks, embeddings):
+            if not embedding:
+                logger.warning(
+                    "Empty embedding for chunk %s of file %s — skipping",
+                    chunk["chunk_index"],
+                    file_id,
+                )
+                continue
+            insert_rows.append(
+                {
+                    "file_id": file_id,
+                    "chunk_text": chunk["text"],
+                    "embedding": _format_pgvector(embedding),
+                    "chunk_index": chunk["chunk_index"],
+                    "page": chunk["page"],
+                }
+            )
+
+        if insert_rows:
+            if _is_postgres(db):
+                db.execute(pg_insert, insert_rows)
+            else:
+                db.execute(sqlite_insert, insert_rows)
+        stored = len(insert_rows)
+
+        db.execute(
+            text(
+                """
+                UPDATE uploaded_files
+                SET embedding_model_version = :version
+                WHERE id = :file_id
+                """
+            ),
+            {"version": EMBEDDING_VERSION, "file_id": file_id},
+        )
+        db.commit()
+        logger.info("Stored %s chunks for file %s", stored, file_id)
+        if stored == 0:
+            raise ValueError(
+                "Embedding API returned no vectors. On Railway, set GEMINI_API_KEY and "
+                f"EMBEDDING_MODEL=gemini-embedding-001 (current: {settings.EMBEDDING_MODEL})."
+            )
+        return True
+
+    except ValueError:
+        db.rollback()
+        raise
     except Exception as exc:
-        print(f"[EMBED] FAISS indexing failed ({exc}) — using text-only fallback")
-        _store_chunks_only(file_id, resolved_chunks, db)
+        logger.error("chunk_and_store failed for %s: %s", file_id, exc)
+        db.rollback()
+        raise ValueError(f"Could not save embeddings to database: {exc}") from exc
+
+
+def file_has_searchable_embeddings(db: Session, file_id: str) -> bool:
+    """True when a file is processed with current-version pgvector rows."""
+    from app.database.db import UploadedFile
+
+    row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    if not row or row.status != "processed":
+        return False
+    if row.embedding_model_version != EMBEDDING_VERSION:
+        return False
+    count = db.execute(
+        text("SELECT COUNT(*) FROM embeddings WHERE file_id = :fid"),
+        {"fid": file_id},
+    ).scalar()
+    return bool(count and count > 0)
 
 
 def search(
@@ -393,85 +532,197 @@ def search(
     top_k: int = 5,
     db: Optional[Session] = None,
 ) -> List[str]:
-    """Search matching chunks across multiple file IDs."""
-    if not file_ids:
+    """
+    Search embeddings using pgvector cosine similarity.
+    Never raises — returns [] on failure.
+    """
+    if not file_ids or db is None:
         return []
 
-    if db is not None:
+    try:
         from app.database.db import UploadedFile
+
+        for file_id in file_ids:
+            if _is_index_stale(db, file_id):
+                try:
+                    reindex_file(db, file_id)
+                except Exception as exc:
+                    logger.warning("Reindex failed for %s: %s", file_id, exc)
+
+        page_num = _extract_page_number(query)
+        if page_num is not None:
+            page_hits = _search_by_page(db, file_ids, page_num, top_k=PAGE_QUERY_TOP_K)
+            if page_hits:
+                return page_hits
 
         for file_id in file_ids:
             row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
             if row and row.raw_text_blob:
-                exact_hit = _exact_string_search(row.raw_text_blob, query)
+                exact_hit = _exact_string_search_raw_text(row.raw_text_blob, query)
                 if exact_hit:
                     return [exact_hit]
 
-    all_matches: list[tuple[str, float]] = []
+        exact = _exact_string_search(db, file_ids, query)
+        if exact:
+            return exact
 
-    for file_id in file_ids:
-        if db is not None and _is_index_stale(db, file_id):
-            try:
-                reindex_file(db, file_id)
-            except Exception as exc:
-                logger.warning("Reindex failed for %s: %s", file_id, exc)
+        if not _is_postgres(db):
+            return _keyword_fallback(db, file_ids, query, top_k)
 
-        index, chunks = _load_vectors(file_id, db)
+        query_embedding = _get_query_embedding(query)
+        if not query_embedding:
+            return _keyword_fallback(db, file_ids, query, top_k)
+
+        results = db.execute(
+            text(
+                """
+                SELECT chunk_text,
+                       1 - (embedding <=> CAST(:query_vec AS vector)) AS similarity
+                FROM embeddings
+                WHERE file_id IN :file_ids
+                ORDER BY similarity DESC
+                LIMIT :top_k
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {
+                "query_vec": _format_pgvector(query_embedding),
+                "file_ids": file_ids,
+                "top_k": top_k,
+            },
+        )
+
+        return [row.chunk_text for row in results]
+
+    except Exception as exc:
+        logger.error("pgvector search failed: %s", exc)
+        return _keyword_fallback(db, file_ids, query, top_k)
+
+
+def _search_by_page(
+    db: Session,
+    file_ids: List[str],
+    page_num: int,
+    top_k: int,
+) -> List[str]:
+    """Return chunks from a specific page, ordered by chunk_index."""
+    try:
+        results = db.execute(
+            text(
+                """
+                SELECT chunk_text FROM embeddings
+                WHERE file_id IN :file_ids
+                AND page = :page_num
+                ORDER BY chunk_index ASC
+                LIMIT :top_k
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {
+                "file_ids": file_ids,
+                "page_num": page_num,
+                "top_k": top_k,
+            },
+        )
+        chunks = [row.chunk_text for row in results]
+        logger.info(
+            "Page %s search: found %s chunks from %s files",
+            page_num,
+            len(chunks),
+            len(file_ids),
+        )
         if not chunks:
-            print(f"[FAISS] Chunks not found for {file_id}")
-            continue
-
-        if index is None:
-            for rank, chunk in enumerate(_simple_chunk_search(chunks, query, top_k)):
-                all_matches.append((chunk, float(rank)))
-            continue
-
-        try:
-            import numpy as np
-
-            model = get_embedding_model()
-            query_vector = model.encode([query])
-            query_np = np.array(query_vector).astype("float32")
-            distances, indices = index.search(query_np, min(top_k, len(chunks)))
-
-            for dist, idx in zip(distances[0], indices[0]):
-                if idx != -1 and idx < len(chunks):
-                    all_matches.append((chunks[idx], float(dist)))
-        except Exception as e:
-            print(f"[FAISS] Search error for {file_id}: {e} — using keyword fallback")
-            for rank, chunk in enumerate(_simple_chunk_search(chunks, query, top_k)):
-                all_matches.append((chunk, float(rank)))
-
-    # FAISS uses lower distance = better; keyword fallback uses lower rank = better
-    all_matches.sort(key=lambda x: x[1])
-
-    seen = set()
-    unique_chunks = []
-    for chunk, _ in all_matches:
-        if chunk not in seen:
-            seen.add(chunk)
-            unique_chunks.append(chunk)
-            if len(unique_chunks) >= top_k:
-                break
-
-    return unique_chunks
+            logger.warning(
+                "Page %s has no chunks — file may need re-indexing with page-aware extraction",
+                page_num,
+            )
+        return chunks
+    except Exception as exc:
+        logger.error("_search_by_page failed: %s", exc)
+        return []
 
 
-def clear_memory_cache(file_id: Optional[str] = None) -> None:
-    """Drop cached indexes (used in tests)."""
-    if file_id is None:
-        _index_memory_cache.clear()
-    else:
-        _index_memory_cache.pop(file_id, None)
+def _exact_string_search(
+    db: Session,
+    file_ids: List[str],
+    query: str,
+) -> List[str]:
+    """Exact string match on stored chunks before semantic search."""
+    try:
+        normalized = query.lower().replace("-", "").replace(" ", "").strip()
+        if not normalized:
+            return []
+
+        results = db.execute(
+            text(
+                """
+                SELECT chunk_text FROM embeddings
+                WHERE file_id IN :file_ids
+                AND LOWER(REPLACE(REPLACE(chunk_text, '-', ''), ' ', ''))
+                    LIKE :pattern
+                LIMIT 3
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {
+                "file_ids": file_ids,
+                "pattern": f"%{normalized}%",
+            },
+        )
+        return [row.chunk_text for row in results]
+    except Exception:
+        return []
 
 
-def delete_file_data(file_id: str) -> None:
-    """Remove in-memory and on-disk vector artifacts for a deleted upload."""
-    clear_memory_cache(file_id)
-    for suffix in (".index", ".chunks"):
-        path = os.path.join(VECTOR_STORE_DIR, f"{file_id}{suffix}")
-        if os.path.isfile(path):
-            try:
-                os.unlink(path)
-            except OSError as exc:
-                logger.warning("Could not delete vector artifact %s: %s", path, exc)
+def _keyword_fallback(
+    db: Session,
+    file_ids: List[str],
+    query: str,
+    top_k: int,
+) -> List[str]:
+    """Keyword search fallback when Gemini embedding or pgvector fails."""
+    try:
+        terms = [term for term in query.split() if len(term) > 3]
+        if not terms:
+            return []
+
+        pattern = "%".join(term.lower() for term in terms)
+        results = db.execute(
+            text(
+                """
+                SELECT chunk_text FROM embeddings
+                WHERE file_id IN :file_ids
+                AND LOWER(chunk_text) LIKE :pattern
+                LIMIT :top_k
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {
+                "file_ids": file_ids,
+                "pattern": f"%{pattern}%",
+                "top_k": top_k,
+            },
+        )
+        return [row.chunk_text for row in results]
+    except Exception:
+        return []
+
+
+def delete_file_data(file_id: str, db: Optional[Session] = None) -> None:
+    """Delete all embeddings for a file. Idempotent."""
+    from app.database.db import SessionLocal
+
+    session = db
+    own_session = False
+    if session is None:
+        session = SessionLocal()
+        own_session = True
+
+    try:
+        session.execute(
+            text("DELETE FROM embeddings WHERE file_id = :fid"),
+            {"fid": file_id},
+        )
+        session.commit()
+    except Exception as exc:
+        logger.warning("delete_file_data failed for %s: %s", file_id, exc)
+        session.rollback()
+    finally:
+        if own_session:
+            session.close()

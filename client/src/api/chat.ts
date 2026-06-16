@@ -1,5 +1,7 @@
 import apiClient from './client'
+import { authHeaders } from './authToken'
 import { readRateLimitFromResponse } from './rateLimit'
+import type { TMessageSource } from '../types/chat'
 
 export interface Conversation {
   id: string
@@ -7,8 +9,6 @@ export interface Conversation {
   created_at: string
   updated_at?: string
 }
-
-import type { TMessageSource } from '../types/chat'
 
 export interface Message {
   id: string
@@ -20,8 +20,14 @@ export interface Message {
   pdf_content?: string | null
   pdf_filename?: string | null
   cache_hit?: boolean
-  source?: TMessageSource | 'catalog'
+  source?: TMessageSource | 'catalog' | null
   links?: { url: string; title: string }[]
+}
+
+function mapMessageSource(source?: string | null): TMessageSource | null | undefined {
+  if (source == null) return null
+  if (source === 'catalog') return 'document'
+  return source as TMessageSource
 }
 
 // baseURL is already http://localhost:8000/api/v1
@@ -51,7 +57,7 @@ export async function getConversationMessages(
     has_pdf: m.has_pdf ?? false,
     pdf_content: m.pdf_content ?? null,
     pdf_filename: m.pdf_filename ?? null,
-    source: m.source === 'catalog' ? 'document' : (m.source ?? 'document'),
+    source: mapMessageSource(m.source) ?? undefined,
     links: m.links ?? [],
   }))
 }
@@ -88,7 +94,7 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
       pdf_content?: string | null
       pdf_filename?: string | null
       cache_hit?: boolean
-      source?: TMessageSource | 'catalog'
+      source?: TMessageSource | 'catalog' | null
       links?: { url: string; title: string }[]
     }
     if (parsed.event === 'done' && parsed.content != null) {
@@ -103,10 +109,7 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
           pdf_content: parsed.pdf_content ?? null,
           pdf_filename: parsed.pdf_filename ?? null,
           cache_hit: parsed.cache_hit ?? false,
-          source:
-            parsed.source === 'catalog'
-              ? 'document'
-              : (parsed.source ?? 'document'),
+          source: mapMessageSource(parsed.source) ?? 'document',
           links: parsed.links ?? [],
         },
       }
@@ -125,17 +128,13 @@ export async function streamMessage(
   handlers: StreamMessageHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('token')
   const url = `${API_BASE}/api/v1/chat/conversations/${conversationId}/messages/stream`
 
   let response: Response
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ content }),
       signal,
     })
@@ -235,7 +234,7 @@ export async function sendMessage(
     has_pdf: assistant.has_pdf ?? false,
     pdf_content: assistant.pdf_content ?? null,
     pdf_filename: assistant.pdf_filename ?? null,
-    source: assistant.source === 'catalog' ? 'document' : (assistant.source ?? 'document'),
+    source: mapMessageSource(assistant.source) ?? 'document',
     links: assistant.links ?? [],
   }
 }
@@ -296,7 +295,7 @@ export async function getConversationDetail(
       has_pdf: m.has_pdf ?? false,
       pdf_content: m.pdf_content ?? null,
       pdf_filename: m.pdf_filename ?? null,
-      source: m.source === 'catalog' ? 'document' : (m.source ?? 'document'),
+      source: mapMessageSource(m.source) ?? undefined,
       links: m.links ?? [],
     })),
   }

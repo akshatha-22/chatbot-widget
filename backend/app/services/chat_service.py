@@ -14,6 +14,26 @@ MARKDOWN_INSTRUCTION = (
     "**bold** for key terms, and blank lines between paragraphs."
 )
 
+DOCUMENT_ACCESS_OVERRIDE = """
+SYSTEM OVERRIDE — READ THIS FIRST:
+You are operating with direct access to document content that has been extracted
+and provided to you below. This is NOT your training data.
+This is NOT web search results.
+This IS real content extracted from the user's actual uploaded document.
+
+ABSOLUTE RULES:
+1. NEVER say "I cannot access your document"
+2. NEVER say "I don't have access to uploaded files"
+3. NEVER say "I cannot read page by page"
+4. NEVER say "my responses are based on training data" when document content is below
+5. ALWAYS treat the DOCUMENT CONTENT section below as the actual contents of the user's file
+6. If the user asks about a specific page, look for [Page X] markers and answer from that section
+7. If the content below does not contain what the user asked for, say:
+   "I found your document but this specific information wasn't in the retrieved sections.
+   Try asking differently or specifying a page number."
+   Then search the web for supplementary information if appropriate.
+"""
+
 NOT_FOUND_MESSAGE = (
     "I couldn't find information about this in your "
     "uploaded document or on the web. Try rephrasing "
@@ -21,7 +41,7 @@ NOT_FOUND_MESSAGE = (
 )
 
 PENDING_DOCUMENT_MESSAGE = (
-    "Your document is still being processed. Please try again in a moment."
+    "Your document is still being processed. Please wait a moment and ask again."
 )
 
 def _gemini_models_to_try() -> List[str]:
@@ -394,12 +414,12 @@ def _is_factual_lookup(query: str) -> bool:
     return False
 
 
-def _has_pending_uploads(db: Session, conversation_id: int) -> bool:
+def _has_pending_files(db: Session, conversation_id: int) -> bool:
     return (
         db.query(UploadedFile)
         .filter(
             UploadedFile.conversation_id == conversation_id,
-            UploadedFile.status.in_(["pending", "processing"]),
+            UploadedFile.status.in_(("pending", "extracting", "embedding")),
         )
         .count()
         > 0
@@ -434,7 +454,7 @@ def _resolve_retrieval_path(
     Returns (source, gemini_prompt_body, use_search, general_chat, fixed_response).
     gemini_prompt_body excludes history — caller appends history + user turn.
     """
-    pending = _has_pending_uploads(db, conversation_id)
+    pending = _has_pending_files(db, conversation_id)
     has_files = _has_uploaded_files(db, conversation_id)
 
     if pending and not (rag_context or "").strip():
@@ -450,6 +470,7 @@ def _resolve_retrieval_path(
 
     if confidence == "high":
         body = (
+            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
             "You are Remi, a helpful AI assistant.\n"
             "Answer the user's question using the document context below.\n"
             "Be specific and direct. Quote relevant details from the document.\n"
@@ -461,6 +482,7 @@ def _resolve_retrieval_path(
 
     if confidence == "low":
         body = (
+            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
             "You are Remi, a helpful AI assistant.\n"
             "The uploaded document contains some relevant information but "
             "may not fully answer the question.\n\n"
@@ -1045,7 +1067,7 @@ def get_processed_file_ids(db: Session, conversation_id: int) -> List[str]:
 
 def build_rag_context(db: Session, conversation_id: int, user_message: str) -> str:
     """
-    Retrieve the most relevant document chunks for the user message via FAISS search.
+    Retrieve the most relevant document chunks for the user message via vector search.
     Returns an empty string if no processed files exist for this conversation.
     """
     try:
@@ -1061,14 +1083,30 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
             print(f"[RAG] No processed files for {conversation_id}")
             return ""
 
-        file_ids = [f.id for f in files]
-        print(f"[RAG] Searching {len(file_ids)} files")
-
-        chunks = vector_store_service.search(file_ids, user_message, top_k=5, db=db)
-        if not chunks:
-            print("[RAG] No chunks returned from FAISS")
+        searchable = [
+            f for f in files if vector_store_service.file_has_searchable_embeddings(db, f.id)
+        ]
+        if not searchable:
+            print(
+                f"[RAG] {len(files)} processed file(s) but none have searchable embeddings "
+                "(re-upload or re-index required)"
+            )
             return ""
 
+        file_ids = [f.id for f in searchable]
+        print(f"[RAG] Searching {len(file_ids)} files with embeddings")
+
+        top_k = (
+            vector_store_service.PAGE_QUERY_TOP_K
+            if vector_store_service._extract_page_number(user_message)
+            else 5
+        )
+        chunks = vector_store_service.search(file_ids, user_message, top_k=top_k, db=db)
+        if not chunks:
+            print(f"[RAG] No chunks returned from search for query: {user_message!r}")
+            return ""
+
+        print(f"[RAG] Retrieved {len(chunks)} chunks ({sum(len(c) for c in chunks)} chars)")
         return "\n\n".join(chunks)
     except Exception as e:
         print(f"[RAG] Error building context: {e}")

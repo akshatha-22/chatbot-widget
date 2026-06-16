@@ -65,12 +65,12 @@ code {
 }
 
 .remi-source-badge {
-  margin-top: 6px;
-  font-size: 11px;
-  opacity: 0.8;
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.8;
 }
 
 .remi-external-links {
@@ -110,8 +110,4 @@ code {
 
 .remi-link-item:hover {
   text-decoration: underline;
-}
-
-.remi-link-icon {
-  flex-shrink: 0;
 }

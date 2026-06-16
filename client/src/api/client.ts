@@ -1,12 +1,13 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import { getAuthToken } from './authToken';
 
 const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
 function attachAuthInterceptor(client: AxiosInstance) {
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers.set('Authorization', `Bearer ${token}`);
     }
     return config;
   });

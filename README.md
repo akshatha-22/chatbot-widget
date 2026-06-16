@@ -2,17 +2,11 @@
 
 A self-contained, embeddable chat widget powered by **Remi**, a warm minimal AI assistant. Users sign in inside the widget, chat with streaming responses, upload documents for RAG-backed answers, export conversations, and generate PDFs—either from the Generate panel or directly in chat with natural language.
 
-<<<<<<< HEAD
 **Repository:** [github.com/Akshatha-22/chatbot-widget](https://github.com/Akshatha-22/chatbot-widget)  
 **Live demo:** [chatbot-widget-client.vercel.app](https://chatbot-widget-client.vercel.app)  
 **API (Railway):** [chatbot-widgetclient-production.up.railway.app](https://chatbot-widgetclient-production.up.railway.app)
-=======
-- **Live demo:** https://chatbot-widget-client-g0f5xma65-akshatha-22s-projects.vercel.app/
-- **Repo:** https://github.com/Akshatha-22/chatbot-widget
-- **API:** https://chatbot-widgetclient-production.up.railway.app
->>>>>>> 3e2113d077cbaea9aba9c741d35929416c4fc5c7
 
-This README reflects **what is in the repository today**, derived from the running code—not aspirational docs or empty scaffold folders.
+This README reflects **what is in the repository today**.
 
 ---
 
@@ -163,7 +157,7 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 │  /api/v1/auth/*    signup, login, me                        │
 │  /api/v1/chat/*    conversations, messages, stream, generate│
 │  /api/v1/chat/conversations/{id}/files  upload, list, delete│
-│  /api/v1/admin/faiss-health  per-user index version health  │
+│  /api/v1/admin/embedding-health  per-user index version health  │
 └─────────┼───────────────────────────────────────────────────┘
           │
     ┌─────┴─────┬──────────────┐
@@ -451,7 +445,7 @@ All chat and file routes require: `Authorization: Bearer <token>`
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/admin/faiss-health` | Current user's files: `embedding_model_version`, `stale` flag |
+| `GET` | `/admin/embedding-health` | Current user's files: `embedding_model_version`, `stale` flag |
 
 ### Assistant message fields
 
@@ -526,10 +520,11 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 ### Production notes
 
 - Set `SECRET_KEY`, `GEMINI_API_KEY`, and `DATABASE_URL` (PostgreSQL recommended) on **Railway**.
+- Do **not** set `EMBEDDING_MODEL=text-embedding-004` (retired). Omit it or use `gemini-embedding-001`.
 - Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
 - Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
 - Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
-- FAISS indices and text chunks are **persisted in PostgreSQL** (`uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`) so Railway redeploys do not wipe RAG.
+- Embeddings are **persisted in PostgreSQL** (`embeddings` table + `embedding_model_version`) so Railway redeploys do not wipe RAG.
 - Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
 
 ### Production (live)

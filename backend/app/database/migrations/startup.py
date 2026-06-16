@@ -44,6 +44,8 @@ def apply_startup_migrations() -> None:
     _migrate_message_pdf_columns()
     _migrate_message_source_links_columns()
     _migrate_uploaded_file_vector_columns()
+    _migrate_uploaded_file_processing_error()
+    _migrate_embeddings_page_column()
     _migrate_gemini_usage_index()
 
 
@@ -109,20 +111,6 @@ def _migrate_uploaded_file_vector_columns() -> None:
         return
 
     alters: list[str] = []
-    if "faiss_index_blob" not in existing:
-        if _is_sqlite():
-            alters.append("ALTER TABLE uploaded_files ADD COLUMN faiss_index_blob BLOB")
-        else:
-            alters.append(
-                "ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS faiss_index_blob BYTEA"
-            )
-    if "chunks_blob" not in existing:
-        if _is_sqlite():
-            alters.append("ALTER TABLE uploaded_files ADD COLUMN chunks_blob BLOB")
-        else:
-            alters.append(
-                "ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS chunks_blob BYTEA"
-            )
     if "embedding_model_version" not in existing:
         if _is_sqlite():
             alters.append(
@@ -142,6 +130,44 @@ def _migrate_uploaded_file_vector_columns() -> None:
                 "ADD COLUMN IF NOT EXISTS raw_text_blob TEXT"
             )
     _run_alters(alters)
+
+
+def _migrate_uploaded_file_processing_error() -> None:
+    existing = _column_names("uploaded_files")
+    if not existing or "processing_error" in existing:
+        return
+
+    if _is_sqlite():
+        _run_alters(["ALTER TABLE uploaded_files ADD COLUMN processing_error TEXT"])
+    else:
+        _run_alters(
+            [
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS processing_error TEXT"
+            ]
+        )
+
+
+def _migrate_embeddings_page_column() -> None:
+    if "embeddings" not in inspect(engine).get_table_names():
+        return
+    existing = _column_names("embeddings")
+    alters: list[str] = []
+    if "page" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE embeddings ADD COLUMN page INTEGER DEFAULT 1")
+        else:
+            alters.append(
+                "ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS page INTEGER DEFAULT 1"
+            )
+    _run_alters(alters)
+    if "embeddings_page_idx" not in _index_names("embeddings"):
+        _run_alters(
+            [
+                "CREATE INDEX IF NOT EXISTS embeddings_page_idx "
+                "ON embeddings (file_id, page)"
+            ]
+        )
 
 
 def _migrate_gemini_usage_index() -> None:
