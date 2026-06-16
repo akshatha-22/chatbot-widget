@@ -240,6 +240,32 @@ def split_text_with_pages(
     return chunks
 
 
+def parse_page_chunks(source_text: str) -> List[dict]:
+    """
+    Build exactly one embedding chunk per [PAGE N] block.
+    Guarantees every extracted page is indexed for page-specific queries.
+    """
+    chunks: List[dict] = []
+    parts = PAGE_MARKER_PATTERN.split(source_text)
+    chunk_index = 0
+    i = 1
+    while i < len(parts) - 1:
+        page_num = int(parts[i])
+        page_content = parts[i + 1].strip()
+        i += 2
+        if not page_content:
+            continue
+        chunks.append(
+            {
+                "text": f"[Page {page_num}] {page_content}",
+                "page": page_num,
+                "chunk_index": chunk_index,
+            }
+        )
+        chunk_index += 1
+    return chunks
+
+
 def _collapse_to_one_chunk_per_page(chunks: List[dict]) -> List[dict]:
     """Merge multiple chunks from the same page into a single indexed chunk."""
     by_page: dict[int, dict] = {}
@@ -299,7 +325,7 @@ def _resolve_index_chunks(
     chunk_size: int,
     chunk_overlap: int,
 ) -> List[dict]:
-    """Cap chunk count so large PDFs finish within Railway timeouts."""
+    """Build index chunks. Page-marked PDFs get one chunk per page (never truncated)."""
     if chunks is not None:
         resolved = [
             {
@@ -311,6 +337,13 @@ def _resolve_index_chunks(
             if chunk.strip()
         ]
     elif PAGE_MARKER_PATTERN.search(source_text):
+        resolved = parse_page_chunks(source_text)
+        if resolved:
+            logger.info(
+                "Page-aware indexing: %s page chunk(s) (one per page)",
+                len(resolved),
+            )
+            return resolved
         resolved = split_text_with_pages(source_text, chunk_size, chunk_overlap)
     else:
         resolved = [
@@ -336,9 +369,8 @@ def _resolve_index_chunks(
                 len(collapsed),
             )
             resolved = collapsed
-
-    if len(resolved) <= MAX_CHUNKS_PER_FILE:
-        return resolved
+        if resolved:
+            return resolved
 
     if chunks is not None:
         logger.warning(
@@ -531,16 +563,22 @@ def chunk_and_store(
             else:
                 db.execute(sqlite_insert, insert_rows)
         stored = len(insert_rows)
+        indexed_pages = len({row["page"] for row in insert_rows if row.get("page")})
 
         db.execute(
             text(
                 """
                 UPDATE uploaded_files
-                SET embedding_model_version = :version
+                SET embedding_model_version = :version,
+                    indexed_page_count = :indexed_pages
                 WHERE id = :file_id
                 """
             ),
-            {"version": EMBEDDING_VERSION, "file_id": file_id},
+            {
+                "version": EMBEDDING_VERSION,
+                "file_id": file_id,
+                "indexed_pages": indexed_pages,
+            },
         )
         db.commit()
         logger.info("Stored %s chunks for file %s", stored, file_id)
@@ -720,6 +758,25 @@ def get_max_page_number(db: Session, file_ids: List[str]) -> int:
         return int(result or 0)
     except Exception as exc:
         logger.warning("get_max_page_number failed: %s", exc)
+        return 0
+
+
+def get_stored_pdf_page_count(db: Session, file_ids: List[str]) -> int:
+    """Total pages in the source PDF(s) as recorded at upload/extract time."""
+    if not file_ids:
+        return 0
+    try:
+        from app.database.db import UploadedFile
+
+        rows = (
+            db.query(UploadedFile.pdf_page_count)
+            .filter(UploadedFile.id.in_(file_ids))
+            .all()
+        )
+        counts = [int(r[0]) for r in rows if r[0] is not None]
+        return max(counts) if counts else 0
+    except Exception as exc:
+        logger.warning("get_stored_pdf_page_count failed: %s", exc)
         return 0
 
 
