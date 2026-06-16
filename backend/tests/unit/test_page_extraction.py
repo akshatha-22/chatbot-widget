@@ -37,6 +37,22 @@ def test_pdf_extracts_three_page_markers(tmp_path):
     assert "Beta content" in text
 
 
+def test_all_pdf_extractors_emit_page_markers(tmp_path):
+    path = _make_pdf(tmp_path, ["Page one text", "Page two text"])
+
+    for extractor in (
+        file_parser_service._extract_pdf_pdfplumber,
+        file_parser_service._extract_pdf_pypdf2,
+        file_parser_service._extract_pdf_pymupdf,
+    ):
+        text = extractor(path)
+        assert "[PAGE 1]" in text
+        assert "[PAGE 2]" in text
+
+    bare = "OCR output without markers"
+    assert "[PAGE 1]" in file_parser_service._ensure_pdf_page_markers(bare)
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -169,3 +185,9 @@ def test_semantic_query_keeps_default_top_k(monkeypatch, db_session):
         db=db_session,
     )
     assert captured["top_k"] == 5
+
+
+def test_embed_batch_size_is_100():
+    from app.services.vector_store_service import EMBED_BATCH_SIZE
+
+    assert EMBED_BATCH_SIZE == 100

@@ -21,20 +21,34 @@ function fileIconColor(filename: string): string {
 type FileListItemProps = {
   file: UploadedFile
   onDelete: (fileId: string) => Promise<void>
+  onReindex?: (fileId: string) => Promise<void>
   compact?: boolean
 }
 
 export default function FileListItem({
   file,
   onDelete,
+  onReindex,
   compact = false,
 }: FileListItemProps) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [reindexing, setReindexing] = useState(false)
 
   const processed = file.status === 'processed'
   const failed = file.status === 'failed'
+  const stale = processed && Boolean(file.stale)
   const failureDetail = file.processing_error?.trim()
+
+  const handleReindex = async () => {
+    if (!onReindex) return
+    setReindexing(true)
+    try {
+      await onReindex(file.id)
+    } finally {
+      setReindexing(false)
+    }
+  }
 
   const handleConfirmDelete = async () => {
     setDeleting(true)
@@ -66,13 +80,30 @@ export default function FileListItem({
           {file.filename}
         </p>
         {processed ? (
-          <p
-            className={`flex items-center gap-1 text-[#22C55E] ${
-              compact ? 'text-[11px]' : 'text-xs'
-            }`}
-          >
-            <Check size={compact ? 11 : 14} /> Ready
-          </p>
+          <div>
+            <p
+              className={`flex items-center gap-1 text-[#22C55E] ${
+                compact ? 'text-[11px]' : 'text-xs'
+              }`}
+            >
+              <Check size={compact ? 11 : 14} /> Ready
+            </p>
+            {stale && (
+              <div className={`mt-1 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+                <p className="text-amber-600">Re-index for page search</p>
+                {onReindex && (
+                  <button
+                    type="button"
+                    onClick={handleReindex}
+                    disabled={reindexing}
+                    className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-amber-800 disabled:opacity-50"
+                  >
+                    {reindexing ? 'Re-indexing…' : 'Re-index'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         ) : failed ? (
           <div>
             <p

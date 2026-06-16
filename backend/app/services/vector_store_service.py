@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_VERSION = "gemini-embedding-001-v768"
 EMBEDDING_DIMENSIONS = 768
-EMBED_BATCH_SIZE = 32
+EMBED_BATCH_SIZE = 100
 MAX_CHUNKS_PER_FILE = 400
 PAGE_QUERY_TOP_K = 15
 PAGE_MARKER_PATTERN = re.compile(r"\[PAGE (\d+)\]", re.IGNORECASE)
@@ -441,7 +441,6 @@ def chunk_and_store(
         )
 
         embeddings = _get_embeddings_batch([chunk["text"] for chunk in resolved_chunks])
-        stored = 0
         pg_insert = text(
             """
             INSERT INTO embeddings
@@ -457,6 +456,7 @@ def chunk_and_store(
             """
         )
 
+        insert_rows: list[dict] = []
         for chunk, embedding in zip(resolved_chunks, embeddings):
             if not embedding:
                 logger.warning(
@@ -465,19 +465,22 @@ def chunk_and_store(
                     file_id,
                 )
                 continue
+            insert_rows.append(
+                {
+                    "file_id": file_id,
+                    "chunk_text": chunk["text"],
+                    "embedding": _format_pgvector(embedding),
+                    "chunk_index": chunk["chunk_index"],
+                    "page": chunk["page"],
+                }
+            )
 
-            params = {
-                "file_id": file_id,
-                "chunk_text": chunk["text"],
-                "embedding": _format_pgvector(embedding),
-                "chunk_index": chunk["chunk_index"],
-                "page": chunk["page"],
-            }
+        if insert_rows:
             if _is_postgres(db):
-                db.execute(pg_insert, params)
+                db.execute(pg_insert, insert_rows)
             else:
-                db.execute(sqlite_insert, params)
-            stored += 1
+                db.execute(sqlite_insert, insert_rows)
+        stored = len(insert_rows)
 
         db.execute(
             text(

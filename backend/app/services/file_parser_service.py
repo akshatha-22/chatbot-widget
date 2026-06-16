@@ -1,10 +1,13 @@
 import csv
 import logging
 import os
+import re
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+PAGE_MARKER_RE = re.compile(r"\[PAGE\s+\d+\]", re.IGNORECASE)
 
 MAX_PDF_OCR_BYTES = 100 * 1024 * 1024
 PDF_FILE_API_THRESHOLD_BYTES = 4 * 1024 * 1024
@@ -99,6 +102,16 @@ def parse_row_chunks(file_path: str, filename: str) -> Optional[List[str]]:
         raise ValueError(f"Error parsing structured file '{filename}': {exc}") from exc
 
     return None
+
+
+def _ensure_pdf_page_markers(text: str) -> str:
+    """Wrap OCR or legacy extractor output with [PAGE N] when markers are missing."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+    if PAGE_MARKER_RE.search(cleaned):
+        return cleaned
+    return f"[PAGE 1]\n{cleaned}"
 
 
 def _extract_pdf_pdfplumber(file_path: str) -> str:
@@ -221,8 +234,7 @@ def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
                 pass
 
     text = (getattr(response, "text", None) or "").strip()
-    if text and not text.lstrip().startswith("[PAGE"):
-        text = f"[PAGE 1]\n{text}"
+    text = _ensure_pdf_page_markers(text)
     if text:
         logger.info("Gemini OCR extracted %s characters from %s", len(text), filename)
     return text
@@ -239,6 +251,7 @@ def _extract_pdf_text(file_path: str, filename: str) -> str:
         try:
             text = extractor(file_path).strip()
             if text:
+                text = _ensure_pdf_page_markers(text)
                 logger.info("PDF text via %s: %s chars from %s", name, len(text), filename)
                 return text
         except Exception as exc:
@@ -247,7 +260,7 @@ def _extract_pdf_text(file_path: str, filename: str) -> str:
     try:
         text = _extract_pdf_gemini_ocr(file_path, filename).strip()
         if text:
-            return text
+            return _ensure_pdf_page_markers(text)
     except Exception as exc:
         logger.error("Gemini OCR failed for %s: %s", filename, exc)
         raise ValueError(f"Could not read text from PDF '{filename}': {exc}") from exc

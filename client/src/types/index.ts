@@ -25,6 +25,8 @@ export interface UploadedFile {
   status: 'pending' | 'processed' | 'failed';
   created_at: string;
   processing_error?: string | null;
+  embedding_model_version?: string | null;
+  stale?: boolean;
 }
 
 export interface User {

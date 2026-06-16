@@ -154,6 +154,7 @@ class Settings(BaseSettings):
     # LLM Settings
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Default embedding model — validator maps retired names (e.g. text-embedding-004) here.
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-3.5-turbo"
@@ -182,6 +183,9 @@ class Settings(BaseSettings):
             "embedding-001",
         }
         if model in retired:
+            return "gemini-embedding-001"
+        allowed = {"gemini-embedding-001"}
+        if model not in allowed:
             return "gemini-embedding-001"
         return model
 

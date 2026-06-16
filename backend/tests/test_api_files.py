@@ -142,3 +142,56 @@ def test_delete_file_isolated_between_users(client, make_auth_headers, upload_di
         headers=intruder_headers,
     )
     assert response.status_code == 403
+
+
+def test_list_files_marks_stale_index(client, auth_headers, conversation_id, db_session):
+    from app.database.db import UploadedFile
+
+    with patch("app.api.v1.files.vector_store_service.chunk_and_store"):
+        upload = client.post(
+            f"/api/v1/chat/conversations/{conversation_id}/files",
+            headers=auth_headers,
+            files={"file": ("notes.txt", io.BytesIO(b"stale test"), "text/plain")},
+        )
+    assert upload.status_code == 201
+    file_id = upload.json()["id"]
+
+    row = db_session.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    row.embedding_model_version = "old-version"
+    db_session.commit()
+
+    listed = client.get(
+        f"/api/v1/chat/conversations/{conversation_id}/files",
+        headers=auth_headers,
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["stale"] is True
+
+
+def test_reindex_file_queues_processing(
+    client, auth_headers, conversation_id, db_session, monkeypatch
+):
+    from app.database.db import UploadedFile
+
+    monkeypatch.delenv("INLINE_FILE_PROCESSING", raising=False)
+
+    with patch("app.api.v1.files.vector_store_service.chunk_and_store"):
+        upload = client.post(
+            f"/api/v1/chat/conversations/{conversation_id}/files",
+            headers=auth_headers,
+            files={"file": ("notes.txt", io.BytesIO(b"reindex me"), "text/plain")},
+        )
+    file_id = upload.json()["id"]
+    row = db_session.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+    row.embedding_model_version = "old-version"
+    row.status = "processed"
+    db_session.commit()
+
+    with patch("app.api.v1.files._run_embedding_in_thread") as mock_thread:
+        response = client.post(
+            f"/api/v1/chat/conversations/{conversation_id}/files/{file_id}/reindex",
+            headers=auth_headers,
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    mock_thread.assert_called_once()
