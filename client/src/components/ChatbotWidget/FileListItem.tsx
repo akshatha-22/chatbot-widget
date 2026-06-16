@@ -148,6 +148,12 @@ export default function FileListItem({
               />
             )}
             {status.label}
+            {file.status_detail && (
+              <span className="text-[#666666]">
+                {' — '}
+                {file.status_detail}
+              </span>
+            )}
           </p>
         )}
         {confirming && (
