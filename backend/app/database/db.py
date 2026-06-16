@@ -86,6 +86,8 @@ class UploadedFile(Base):
     raw_text_blob = Column(Text, nullable=True)
     processing_error = Column(Text, nullable=True)
     status_detail = Column(Text, nullable=True)
+    pdf_page_count = Column(Integer, nullable=True)
+    indexed_page_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="files")

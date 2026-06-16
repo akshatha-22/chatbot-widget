@@ -11,6 +11,7 @@ from app.services.vector_store_service import (
     PAGE_QUERY_TOP_K,
     _extract_page_number,
     _search_by_page,
+    parse_page_chunks,
     split_text_with_pages,
 )
 
@@ -51,6 +52,23 @@ def test_pdf_extracts_three_page_markers(tmp_path):
 )
 def test_extract_page_number(query, expected):
     assert _extract_page_number(query) == expected
+
+
+def test_parse_page_chunks_one_chunk_per_page():
+    source = "\n\n".join(
+        f"[PAGE {n}]\nContent for page {n} with enough text."
+        for n in (1, 50, 233, 256)
+    )
+    chunks = parse_page_chunks(source)
+    assert len(chunks) == 4
+    assert {c["page"] for c in chunks} == {1, 50, 233, 256}
+    assert all(c["chunk_index"] == i for i, c in enumerate(chunks))
+    assert chunks[2]["text"].startswith("[Page 233]")
+
+
+def test_count_extracted_pages():
+    text = "[PAGE 1]\na\n\n[PAGE 2]\nb\n\n[PAGE 74]\nc"
+    assert file_parser_service.count_extracted_pages(text) == 3
 
 
 def test_split_text_with_pages_preserves_page_prefix():

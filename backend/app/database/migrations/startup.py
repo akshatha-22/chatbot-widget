@@ -46,6 +46,7 @@ def apply_startup_migrations() -> None:
     _migrate_uploaded_file_vector_columns()
     _migrate_uploaded_file_processing_error()
     _migrate_uploaded_file_status_detail()
+    _migrate_uploaded_file_page_counts()
     _migrate_embeddings_page_column()
     _migrate_gemini_usage_index()
 
@@ -163,6 +164,31 @@ def _migrate_uploaded_file_status_detail() -> None:
                 "ADD COLUMN IF NOT EXISTS status_detail TEXT"
             ]
         )
+
+
+def _migrate_uploaded_file_page_counts() -> None:
+    existing = _column_names("uploaded_files")
+    if not existing:
+        return
+
+    alters: list[str] = []
+    if "pdf_page_count" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE uploaded_files ADD COLUMN pdf_page_count INTEGER")
+        else:
+            alters.append(
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS pdf_page_count INTEGER"
+            )
+    if "indexed_page_count" not in existing:
+        if _is_sqlite():
+            alters.append("ALTER TABLE uploaded_files ADD COLUMN indexed_page_count INTEGER")
+        else:
+            alters.append(
+                "ALTER TABLE uploaded_files "
+                "ADD COLUMN IF NOT EXISTS indexed_page_count INTEGER"
+            )
+    _run_alters(alters)
 
 
 def _migrate_embeddings_page_column() -> None:

@@ -60,6 +60,7 @@ def _set_file_status(
     *,
     processing_error: str | None = None,
     status_detail: str | None = None,
+    pdf_page_count: int | None = None,
 ) -> None:
     """Update file status in a dedicated session (safe after chunk_and_store commits)."""
     db = SessionLocal()
@@ -72,6 +73,8 @@ def _set_file_status(
             db_file.processing_error = processing_error[:500] if processing_error else None
         if status_detail is not None:
             db_file.status_detail = status_detail[:500] if status_detail else None
+        if pdf_page_count is not None:
+            db_file.pdf_page_count = pdf_page_count
         db.commit()
     except Exception as exc:
         logger.error("Failed to set status %s for %s: %s", status, file_id, exc)
@@ -147,7 +150,21 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
         def _on_extract_progress(detail: str) -> None:
             _set_file_status(file_id, "extracting", status_detail=detail)
 
-        _set_file_status(file_id, "extracting", status_detail="Starting extraction…")
+        pdf_total = None
+        if filename.lower().endswith(".pdf") and os.path.isfile(file_path):
+            pdf_total = file_parser_service.get_pdf_page_count(file_path)
+            if pdf_total > 0:
+                _set_file_status(
+                    file_id,
+                    "extracting",
+                    status_detail=f"Reading {pdf_total} pages…",
+                    pdf_page_count=pdf_total,
+                )
+            else:
+                _set_file_status(file_id, "extracting", status_detail="Starting extraction…")
+        else:
+            _set_file_status(file_id, "extracting", status_detail="Starting extraction…")
+
         print(f"[EMBED] Extracting text from {filename}")
         extracted_text = file_parser_service.extract_text(
             file_path,
@@ -157,18 +174,29 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
         if not extracted_text or not extracted_text.strip():
             raise ValueError(f"No text extracted from {filename}")
 
-        print(f"[EMBED] Extracted {len(extracted_text)} characters")
-        row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
-        chunk_hint = len(row_chunks) if row_chunks else max(1, len(extracted_text) // 1000)
-        _set_file_status(
-            file_id,
-            "embedding",
-            status_detail=f"Indexing {chunk_hint} section(s)…",
-        )
+        extracted_pages = file_parser_service.count_extracted_pages(extracted_text)
+        if pdf_total and extracted_pages:
+            _set_file_status(
+                file_id,
+                "embedding",
+                status_detail=f"Indexing {extracted_pages} of {pdf_total} page(s)…",
+                pdf_page_count=pdf_total,
+            )
+        else:
+            row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
+            chunk_hint = len(row_chunks) if row_chunks else max(1, len(extracted_text) // 1000)
+            _set_file_status(
+                file_id,
+                "embedding",
+                status_detail=f"Indexing {chunk_hint} section(s)…",
+            )
+
+        print(f"[EMBED] Extracted {len(extracted_text)} characters ({extracted_pages} pages)")
         print(f"[EMBED] Creating pgvector embeddings for {file_id}")
 
         embed_db = SessionLocal()
         try:
+            row_chunks = file_parser_service.parse_row_chunks(file_path, filename)
             vector_store_service.chunk_and_store(
                 file_id,
                 extracted_text,

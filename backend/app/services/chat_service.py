@@ -657,18 +657,32 @@ def _page_not_found_message(
     db: Session,
     file_ids: List[str],
 ) -> str:
-    max_page = vector_store_service.get_max_page_number(db, file_ids)
-    msg = (
+    max_indexed = vector_store_service.get_max_page_number(db, file_ids)
+    pdf_total = vector_store_service.get_stored_pdf_page_count(db, file_ids)
+
+    if pdf_total and page_num <= pdf_total and page_num > max_indexed:
+        return (
+            f"I couldn't read page {page_num} from your PDF. "
+            f"Your file has {pdf_total} pages and {max_indexed} were indexed with readable text. "
+            f"Page {page_num} may be image-only or failed during processing — try re-uploading the file."
+        )
+
+    if pdf_total and max_indexed > 0:
+        return (
+            f"I couldn't find page {page_num} in your uploaded document. "
+            f"Your PDF has {pdf_total} pages; indexed content covers pages 1–{max_indexed}."
+        )
+
+    if max_indexed > 0:
+        return (
+            f"I couldn't find page {page_num} in your uploaded document. "
+            f"The indexed content covers pages 1–{max_indexed}."
+        )
+
+    return (
         f"I couldn't find page {page_num} in your uploaded document. "
         "Try a different page number."
     )
-    if max_page > 0:
-        msg = (
-            f"I couldn't find page {page_num} in your uploaded document. "
-            f"The indexed content covers pages 1–{max_page}. "
-            "Try a different page number."
-        )
-    return msg
 
 
 def _document_miss_prompt(user_message: str) -> str:
