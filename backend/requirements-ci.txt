@@ -1,4 +1,5 @@
-# CI / pytest — core app + tests without heavy ML wheels (torch, sentence-transformers).
-# Tests mock FAISS indexing; vector_store_service uses lazy imports for ML deps.
+# CI / pytest — core app + tests without heavy ML wheels.
+# Tests mock Gemini embeddings; vector_store uses pgvector on PostgreSQL only.
 
 -r requirements-ci-core.txt
+pgvector==0.3.6

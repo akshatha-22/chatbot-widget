@@ -1,12 +1,12 @@
-"""Tests for FAISS health admin endpoint."""
+"""Tests for embedding health admin endpoint."""
 
 
-def test_faiss_health_requires_auth(client):
-    response = client.get("/api/v1/admin/faiss-health")
+def test_embedding_health_requires_auth(client):
+    response = client.get("/api/v1/admin/embedding-health")
     assert response.status_code == 401
 
 
-def test_faiss_health_lists_files(client, auth_headers, conversation_id, upload_dir):
+def test_embedding_health_lists_files(client, auth_headers, conversation_id, upload_dir):
     import io
     from unittest.mock import patch
 
@@ -17,7 +17,7 @@ def test_faiss_health_lists_files(client, auth_headers, conversation_id, upload_
             files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
         )
 
-    response = client.get("/api/v1/admin/faiss-health", headers=auth_headers)
+    response = client.get("/api/v1/admin/embedding-health", headers=auth_headers)
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) >= 1
@@ -25,7 +25,7 @@ def test_faiss_health_lists_files(client, auth_headers, conversation_id, upload_
     assert "stale" in payload[0]
 
 
-def test_faiss_health_scoped_to_current_user(client, make_auth_headers, upload_dir):
+def test_embedding_health_scoped_to_current_user(client, make_auth_headers, upload_dir):
     import io
     from unittest.mock import patch
 
@@ -55,8 +55,8 @@ def test_faiss_health_scoped_to_current_user(client, make_auth_headers, upload_d
             files={"file": ("b.txt", io.BytesIO(b"user b file"), "text/plain")},
         )
 
-    health_a = client.get("/api/v1/admin/faiss-health", headers=user_a).json()
-    health_b = client.get("/api/v1/admin/faiss-health", headers=user_b).json()
+    health_a = client.get("/api/v1/admin/embedding-health", headers=user_a).json()
+    health_b = client.get("/api/v1/admin/embedding-health", headers=user_b).json()
 
     assert len(health_a) == 1
     assert health_a[0]["filename"] == "a.txt"

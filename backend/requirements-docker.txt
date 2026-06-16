@@ -4,6 +4,4 @@
 -r requirements-ci-core.txt
 
 psycopg2-binary==2.9.9
-faiss-cpu>=1.8.0
-huggingface_hub>=0.34.0
-numpy>=1.26.0
+pgvector==0.3.6

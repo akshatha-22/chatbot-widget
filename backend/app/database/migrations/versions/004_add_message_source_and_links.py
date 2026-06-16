@@ -1,4 +1,4 @@
-"""Add message source/links and uploaded_files raw_text_blob.
+"""Add message source and links columns.
 
 Revision ID: 004_message_source_links
 Revises: 20250603_0001
@@ -19,7 +19,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "messages",
-        sa.Column("source", sa.String(length=50), server_default="catalog", nullable=False),
+        sa.Column("source", sa.String(length=50), server_default="document", nullable=False),
     )
     op.add_column(
         "messages",

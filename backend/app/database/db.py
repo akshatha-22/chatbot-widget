@@ -10,19 +10,27 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Text,
-    LargeBinary,
     UniqueConstraint,
     JSON,
+    func,
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from app.config import settings
 
-# Configure SQLite specific arguments if SQLite is used
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
 
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
+def _engine_connect_args(database_url: str) -> dict:
+    """Driver connect_args for SQLite (local) and SSL-required hosts (e.g. Neon)."""
+    if database_url.startswith("sqlite"):
+        return {"check_same_thread": False}
+    if "neon.tech" in database_url:
+        return {"sslmode": "require"}
+    return {}
+
+
+engine = create_engine(
+    settings.DATABASE_URL,
+    connect_args=_engine_connect_args(settings.DATABASE_URL),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -60,7 +68,7 @@ class Message(Base):
     has_pdf = Column(Boolean, default=False)
     pdf_content = Column(Text, nullable=True)
     pdf_filename = Column(String(255), nullable=True)
-    source = Column(String(50), default="catalog", nullable=False)
+    source = Column(String(50), default="document", nullable=False)
     links = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
@@ -74,13 +82,34 @@ class UploadedFile(Base):
     filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)   # where you saved it on disk
     status = Column(String(50), default="pending")  # pending → processed
-    faiss_index_blob = Column(LargeBinary, nullable=True)
-    chunks_blob = Column(LargeBinary, nullable=True)
     embedding_model_version = Column(String(100), nullable=True)
     raw_text_blob = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="files")
+    embeddings = relationship(
+        "Embedding",
+        back_populates="uploaded_file",
+        cascade="all, delete-orphan",
+    )
+
+
+class Embedding(Base):
+    __tablename__ = "embeddings"
+
+    id = Column(Integer, primary_key=True)
+    file_id = Column(
+        String(255),
+        ForeignKey("uploaded_files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chunk_text = Column(Text)
+    embedding = Column(Text)
+    chunk_index = Column(Integer)
+    created_at = Column(DateTime, server_default=func.now())
+
+    uploaded_file = relationship("UploadedFile", back_populates="embeddings")
 
 
 class GeminiDailyUsage(Base):

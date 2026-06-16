@@ -66,7 +66,7 @@ export async function streamSendMessage({
                 role: 'assistant',
                 content: chunk,
                 created_at: new Date().toISOString(),
-                source: 'catalog',
+                source: 'document',
                 links: [],
               },
             ]

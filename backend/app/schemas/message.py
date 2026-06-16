@@ -18,5 +18,5 @@ class MessageResponse(MessageBase):
     pdf_content: Optional[str] = None
     pdf_filename: Optional[str] = None
     cache_hit: bool = False
-    source: str = "catalog"
+    source: str = "document"
     links: List[dict] = []

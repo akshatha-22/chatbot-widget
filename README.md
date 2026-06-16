@@ -157,7 +157,7 @@ Sign up inside the widget, click the Remi launcher, and start chatting.
 │  /api/v1/auth/*    signup, login, me                        │
 │  /api/v1/chat/*    conversations, messages, stream, generate│
 │  /api/v1/chat/conversations/{id}/files  upload, list, delete│
-│  /api/v1/admin/faiss-health  per-user index version health  │
+│  /api/v1/admin/embedding-health  per-user index version health  │
 └─────────┼───────────────────────────────────────────────────┘
           │
     ┌─────┴─────┬──────────────┐
@@ -445,7 +445,7 @@ All chat and file routes require: `Authorization: Bearer <token>`
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/admin/faiss-health` | Current user's files: `embedding_model_version`, `stale` flag |
+| `GET` | `/admin/embedding-health` | Current user's files: `embedding_model_version`, `stale` flag |
 
 ### Assistant message fields
 
@@ -523,7 +523,7 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 - Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
 - Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
 - Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
-- FAISS indices and text chunks are **persisted in PostgreSQL** (`uploaded_files.faiss_index_blob`, `chunks_blob`, `embedding_model_version`) so Railway redeploys do not wipe RAG.
+- Embeddings are **persisted in PostgreSQL** (`embeddings` table + `embedding_model_version`) so Railway redeploys do not wipe RAG.
 - Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
 
 ### Production (live)

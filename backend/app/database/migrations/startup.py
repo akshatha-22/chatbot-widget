@@ -86,12 +86,12 @@ def _migrate_message_source_links_columns() -> None:
     if "source" not in existing:
         if _is_sqlite():
             alters.append(
-                "ALTER TABLE messages ADD COLUMN source VARCHAR(50) DEFAULT 'catalog'"
+                "ALTER TABLE messages ADD COLUMN source VARCHAR(50) DEFAULT 'document'"
             )
         else:
             alters.append(
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS "
-                "source VARCHAR(50) DEFAULT 'catalog'"
+                "source VARCHAR(50) DEFAULT 'document'"
             )
     if "links" not in existing:
         if _is_sqlite():
@@ -109,20 +109,6 @@ def _migrate_uploaded_file_vector_columns() -> None:
         return
 
     alters: list[str] = []
-    if "faiss_index_blob" not in existing:
-        if _is_sqlite():
-            alters.append("ALTER TABLE uploaded_files ADD COLUMN faiss_index_blob BLOB")
-        else:
-            alters.append(
-                "ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS faiss_index_blob BYTEA"
-            )
-    if "chunks_blob" not in existing:
-        if _is_sqlite():
-            alters.append("ALTER TABLE uploaded_files ADD COLUMN chunks_blob BLOB")
-        else:
-            alters.append(
-                "ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS chunks_blob BYTEA"
-            )
     if "embedding_model_version" not in existing:
         if _is_sqlite():
             alters.append(

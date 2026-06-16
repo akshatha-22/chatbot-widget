@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
-from app.database.db import Base, get_db
+from app.database.db import Base, get_db, Embedding  # noqa: F401 — register embeddings table
 from app.schemas import audit_log  # noqa: F401 — register audit_logs model
 from app.main import app
 
@@ -95,11 +95,24 @@ def clear_auth_rate_limits():
 
 
 @pytest.fixture(autouse=True)
+def mock_gemini_embedding(monkeypatch):
+    """Avoid live Gemini embedding API calls in tests."""
+    monkeypatch.setattr(
+        "app.services.vector_store_service._get_embedding",
+        lambda text: [0.1] * 768,
+    )
+    monkeypatch.setattr(
+        "app.services.vector_store_service._get_query_embedding",
+        lambda text: [0.1] * 768,
+    )
+
+
+@pytest.fixture(autouse=True)
 def noop_vector_index_by_default(monkeypatch):
-    """Avoid loading sentence-transformers/torch unless a test overrides this."""
+    """Skip DB embedding writes in API tests (SQLite has no pgvector)."""
     monkeypatch.setattr(
         "app.services.vector_store_service.chunk_and_store",
-        lambda *args, **kwargs: None,
+        lambda *args, **kwargs: True,
     )
 
 
