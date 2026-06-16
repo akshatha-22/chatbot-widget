@@ -108,6 +108,7 @@ class Embedding(Base):
     chunk_text = Column(Text)
     embedding = Column(Text)
     chunk_index = Column(Integer)
+    page = Column(Integer, default=1)
     created_at = Column(DateTime, server_default=func.now())
 
     uploaded_file = relationship("UploadedFile", back_populates="embeddings")

@@ -1,6 +1,7 @@
 import csv
 import logging
 import os
+from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -100,29 +101,51 @@ def parse_row_chunks(file_path: str, filename: str) -> Optional[List[str]]:
     return None
 
 
+def _extract_pdf_pdfplumber(file_path: str) -> str:
+    """Extract PDF text page-by-page with [PAGE N] markers."""
+    import pdfplumber
+
+    pages: List[str] = []
+    with pdfplumber.open(file_path) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            try:
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(f"[PAGE {i}]\n{page_text.strip()}")
+            except Exception as exc:
+                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
+    return "\n\n".join(pages)
+
+
 def _extract_pdf_pypdf2(file_path: str) -> str:
     import PyPDF2
 
-    parts: List[str] = []
+    pages: List[str] = []
     with open(file_path, "rb") as handle:
         reader = PyPDF2.PdfReader(handle)
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                parts.append(page_text)
-    return "\n".join(parts)
+        for i, page in enumerate(reader.pages, start=1):
+            try:
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(f"[PAGE {i}]\n{page_text.strip()}")
+            except Exception as exc:
+                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
+    return "\n\n".join(pages)
 
 
 def _extract_pdf_pymupdf(file_path: str) -> str:
     import fitz
 
-    parts: List[str] = []
+    pages: List[str] = []
     with fitz.open(file_path) as doc:
-        for page in doc:
-            text = page.get_text("text")
-            if text and text.strip():
-                parts.append(text.strip())
-    return "\n".join(parts)
+        for i, page in enumerate(doc, start=1):
+            try:
+                text = page.get_text("text")
+                if text and text.strip():
+                    pages.append(f"[PAGE {i}]\n{text.strip()}")
+            except Exception as exc:
+                logger.warning("Skipping PDF page %s in %s: %s", i, file_path, exc)
+    return "\n\n".join(pages)
 
 
 def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
@@ -147,6 +170,8 @@ def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
     model = settings.GEMINI_MODEL.removeprefix("models/")
     prompt = (
         "Extract all readable text from this PDF document. "
+        "Prefix each page with [PAGE N] on its own line before that page's text "
+        "(N is the page number starting at 1). "
         "Include product names, part numbers, descriptions, and tables. "
         "Return plain text only — no markdown code fences."
     )
@@ -196,14 +221,17 @@ def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
                 pass
 
     text = (getattr(response, "text", None) or "").strip()
+    if text and not text.lstrip().startswith("[PAGE"):
+        text = f"[PAGE 1]\n{text}"
     if text:
         logger.info("Gemini OCR extracted %s characters from %s", len(text), filename)
     return text
 
 
 def _extract_pdf_text(file_path: str, filename: str) -> str:
-    """Try PyPDF2, then PyMuPDF, then Gemini OCR for image-only PDFs."""
+    """Try pdfplumber, PyPDF2, PyMuPDF, then Gemini OCR for image-only PDFs."""
     extractors = (
+        ("pdfplumber", _extract_pdf_pdfplumber),
         ("PyPDF2", _extract_pdf_pypdf2),
         ("PyMuPDF", _extract_pdf_pymupdf),
     )
@@ -230,19 +258,19 @@ def _extract_pdf_text(file_path: str, filename: str) -> str:
     )
 
 
-def extract_text(file_path: str, filename: str) -> str:
+def extract_text_with_pages(file_path: str, filename: str) -> str:
     """
-    Extracts plain text content from a file based on its extension.
-    Supports PDF (.pdf), DOCX (.docx), XLSX (.xlsx), and plain text (.txt, .md, .csv, etc.).
+    Extract text preserving page numbers.
+    Each page is prefixed with [PAGE X]. Non-PDF formats use [PAGE 1].
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found at path: {file_path}")
 
     row_chunks = parse_row_chunks(file_path, filename)
     if row_chunks:
-        return "\n".join(row_chunks)
+        return f"[PAGE 1]\n" + "\n".join(row_chunks)
 
-    ext = os.path.splitext(filename.lower())[1]
+    ext = Path(file_path).suffix.lower() or os.path.splitext(filename.lower())[1]
 
     try:
         if ext == ".pdf":
@@ -252,11 +280,18 @@ def extract_text(file_path: str, filename: str) -> str:
             import docx
 
             doc = docx.Document(file_path)
-            paragraphs = [para.text for para in doc.paragraphs]
-            return "\n".join(paragraphs)
+            paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+            body = "\n".join(paragraphs)
+            return f"[PAGE 1]\n{body}"
 
         with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            return handle.read()
+            body = handle.read()
+        return f"[PAGE 1]\n{body}"
 
     except Exception as exc:
         raise ValueError(f"Error parsing file '{filename}': {exc}") from exc
+
+
+def extract_text(file_path: str, filename: str) -> str:
+    """Extract plain text with page markers for RAG indexing."""
+    return extract_text_with_pages(file_path, filename)
