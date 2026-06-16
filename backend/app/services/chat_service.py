@@ -85,7 +85,9 @@ def ensure_gemini_quota(
         return
 
     rag_context = build_rag_context(db, conversation_id, user_message)
-    use_search = _resolve_use_search(db, conversation_id, rag_context, user_message)
+    _, _, use_search, _, _ = _resolve_retrieval_path(
+        db, conversation_id, rag_context, user_message
+    )
     if response_cache.get_cached_response(user_id, user_message, rag_context, use_search):
         return
 
@@ -327,7 +329,11 @@ def _stream_gemini(
 
 
 def extract_grounding_links(response) -> List[dict]:
-    """Extract web source URLs from Gemini grounding metadata. Never raises."""
+    """
+    Extract web source URLs and titles from Gemini grounding metadata.
+    Returns [] if grounding metadata is absent or malformed.
+    Never raises — all errors swallowed silently.
+    """
     links: List[dict] = []
     try:
         chunks = (
@@ -348,22 +354,72 @@ def extract_grounding_links(response) -> List[dict]:
     return links[:5]
 
 
-def _is_conversational(query: str) -> bool:
-    """True if the query is general conversation that doesn't need web search."""
-    q = query.lower().strip()
-    return any(re.match(pattern, q) for pattern in CONVERSATIONAL_PATTERNS)
+def _rag_confidence(rag_context: str, query: str) -> str:
+    """
+    Returns:
+      "high"   — document clearly contains relevant answer
+      "low"    — document has something but probably incomplete
+      "none"   — document has nothing relevant
+    """
+    if not rag_context or len(rag_context.strip()) < 50:
+        return "none"
 
+    query_terms = set(query.lower().split())
+    context_lower = rag_context.lower()
 
-def _has_uploaded_files(db: Session, conversation_id: int) -> bool:
-    return (
-        db.query(UploadedFile)
-        .filter(
-            UploadedFile.conversation_id == conversation_id,
-            UploadedFile.status == "processed",
-        )
-        .count()
-        > 0
+    matches = sum(
+        1 for term in query_terms if len(term) > 3 and term in context_lower
     )
+    coverage = matches / max(len([t for t in query_terms if len(t) > 3]), 1)
+
+    if coverage >= 0.6:
+        return "high"
+    if coverage >= 0.2:
+        return "low"
+    return "none"
+
+
+def _is_general_conversational_message(query: str) -> bool:
+    """True for greetings, creative tasks, opinions — skip web search when no files."""
+    msg_lower = query.lower().strip()
+    if re.search(r"\b(?:hello|hi|hey|thanks|thank you|bye|goodbye|greetings)\b", msg_lower):
+        return True
+    if re.search(
+        r"\b(?:write|create|draft|compose|brainstorm|imagine|story|poem|joke|roleplay)\b",
+        msg_lower,
+    ):
+        return True
+    if re.search(r"\b(?:what do you think|your opinion|how are you|who are you)\b", msg_lower):
+        return True
+    return False
+
+
+def _is_factual_lookup(query: str) -> bool:
+    """Heuristic: factual questions that benefit from web grounding."""
+    if _is_general_conversational_message(query):
+        return False
+    msg_lower = query.lower().strip()
+    factual_patterns = [
+        r"\bwhat is\b",
+        r"\bwho is\b",
+        r"\bwhen (?:was|did)\b",
+        r"\bwhere is\b",
+        r"\bhow many\b",
+        r"\bhow much\b",
+        r"\bcapital of\b",
+        r"\bdefine\b",
+        r"\bexplain\b",
+        r"\blatest\b",
+        r"\bcurrent\b",
+        r"\bprice of\b",
+        r"\bcost of\b",
+        r"\btell me about\b",
+    ]
+    if any(re.search(p, msg_lower) for p in factual_patterns):
+        return True
+    if msg_lower.endswith("?"):
+        return len(msg_lower.split()) <= 15
+    return False
 
 
 def _has_pending_files(db: Session, conversation_id: int) -> bool:
@@ -378,6 +434,15 @@ def _has_pending_files(db: Session, conversation_id: int) -> bool:
     )
 
 
+def _has_uploaded_files(db: Session, conversation_id: int) -> bool:
+    return (
+        db.query(UploadedFile)
+        .filter(UploadedFile.conversation_id == conversation_id)
+        .count()
+        > 0
+    )
+
+
 def _append_history_to_prompt(
     prompt: str, history: List[Message], user_message: str
 ) -> str:
@@ -387,16 +452,10 @@ def _append_history_to_prompt(
     return prompt
 
 
-def _finalize_prompt_with_history(
-    body: str, history: List[Message], user_message: str
-) -> str:
-    if not history:
-        return body
-    history_block = "".join(f"{msg.role.capitalize()}: {msg.content}\n" for msg in history)
-    marker = f"Question: {user_message}"
-    if marker in body:
-        return body.replace(marker, f"{history_block}{marker}\nAssistant:")
-    return _append_history_to_prompt(body, history, user_message)
+def _is_conversational(query: str) -> bool:
+    """True if the query is general conversation that doesn't need web search."""
+    q = query.lower().strip()
+    return any(re.match(pattern, q) for pattern in CONVERSATIONAL_PATTERNS)
 
 
 def _build_prompt_and_search_flag(
@@ -504,6 +563,89 @@ def _resolve_use_search(
     return use_search
 
 
+def _resolve_retrieval_path(
+    db: Session,
+    conversation_id: int,
+    rag_context: str,
+    user_message: str,
+) -> Tuple[str, str, bool, bool, Optional[str]]:
+    """
+    Returns (source, gemini_prompt_body, use_search, general_chat, fixed_response).
+    gemini_prompt_body excludes history — caller appends history + user turn.
+    """
+    pending = _has_pending_files(db, conversation_id)
+    has_files = _has_uploaded_files(db, conversation_id)
+
+    if pending and not (rag_context or "").strip():
+        return (
+            "document",
+            "",
+            False,
+            False,
+            PENDING_DOCUMENT_MESSAGE,
+        )
+
+    confidence = _rag_confidence(rag_context, user_message)
+
+    if confidence == "high":
+        body = (
+            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
+            "You are Remi, a helpful AI assistant.\n"
+            "Answer the user's question using the document context below.\n"
+            "Be specific and direct. Quote relevant details from the document.\n"
+            "If the document contains partial information, say so clearly.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+            f"DOCUMENT CONTEXT:\n{rag_context}\n\n"
+        )
+        return "document", body, False, False, None
+
+    if confidence == "low":
+        body = (
+            f"{DOCUMENT_ACCESS_OVERRIDE}\n"
+            "You are Remi, a helpful AI assistant.\n"
+            "The uploaded document contains some relevant information but "
+            "may not fully answer the question.\n\n"
+            "First, share what the document says:\n"
+            f"DOCUMENT CONTEXT:\n{rag_context}\n\n"
+            "Then supplement with current web information to give a "
+            "complete answer. Clearly separate what came from the "
+            "document vs what came from the web.\n"
+            'Label document info as: "From your document:"\n'
+            'Label web info as: "From the web:"\n'
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+        )
+        return "both", body, True, False, None
+
+    # confidence == "none"
+    if not has_files:
+        if _is_factual_lookup(user_message):
+            body = (
+                "You are Remi, a helpful AI assistant.\n"
+                "The user has not uploaded any documents. Search the web and "
+                "provide a thorough answer with sources.\n"
+                f"{MARKDOWN_INSTRUCTION}\n\n"
+            )
+            return "web", body, True, False, None
+        body = (
+            "You are Remi, a helpful AI assistant.\n"
+            "Answer the user's message conversationally and helpfully.\n"
+            f"{MARKDOWN_INSTRUCTION}\n\n"
+        )
+        return "document", body, False, True, None
+
+    body = (
+        "You are Remi, a helpful AI assistant.\n"
+        "The uploaded document does not contain information "
+        "about this topic. Search the web and provide a "
+        "thorough answer with sources.\n\n"
+        "Begin your response with:\n"
+        '"This isn\'t covered in your uploaded document.\n'
+        ' Here\'s what I found online:"\n\n'
+        f"{MARKDOWN_INSTRUCTION}\n\n"
+    )
+    return "web", body, True, False, None
+
+
 def format_sse(text: str) -> str:
     """Format a single SSE event: data: <text>\\n\\n (multi-line safe)."""
     if not text:
@@ -516,6 +658,7 @@ def format_sse(text: str) -> str:
 
 def format_sse_done(assistant_message: Message) -> str:
     """Final SSE event with persisted assistant message metadata."""
+    links = getattr(assistant_message, "links", None) or []
     payload = json.dumps(
         {
             "event": "done",
@@ -529,8 +672,8 @@ def format_sse_done(assistant_message: Message) -> str:
             "pdf_content": getattr(assistant_message, "pdf_content", None),
             "pdf_filename": getattr(assistant_message, "pdf_filename", None),
             "cache_hit": bool(getattr(assistant_message, "cache_hit", False)),
-            "source": getattr(assistant_message, "source", None) or "document",
-            "links": getattr(assistant_message, "links", None) or [],
+            "source": getattr(assistant_message, "source", "document") or "document",
+            "links": links,
         }
     )
     return f"data: {payload}\n\n"
@@ -688,7 +831,7 @@ def _create_pdf_assistant_message(
 def _prepare_assistant_context(
     db: Session, conversation_id: int, user_id: int, user_message: str
 ) -> Tuple[Conversation, str, str, List[Message], Optional[str], str, bool, Optional[str]]:
-    """Shared setup: auto-title, history, RAG quality routing, Gemini prompt."""
+    """Shared setup: auto-title, history, RAG, tiered Gemini prompt."""
     conv = get_conversation(db, conversation_id, user_id)
 
     _DEFAULT_TITLES = ("New Conversation", "New Chat", "Conversation")
@@ -701,40 +844,23 @@ def _prepare_assistant_context(
 
     ordered = sorted(conv.messages, key=lambda m: m.created_at or datetime.min)
     history = ordered[-7:-1] if len(ordered) > 1 else []
-
-    if _has_pending_files(db, conversation_id):
-        return conv, "", "", history, None, "document", False, PENDING_DOCUMENT_MESSAGE
-
-    has_files = _has_uploaded_files(db, conversation_id)
-    rag_context = build_rag_context(db, conversation_id, user_message) if has_files else ""
+    rag_context = build_rag_context(db, conversation_id, user_message)
 
     print(f"[RAG] conversation_id: {conversation_id}")
     print(f"[RAG] context length: {len(rag_context)}")
     if rag_context:
         print(f"[RAG] context preview: {rag_context[:200]}")
 
-    if not has_files:
-        if _is_conversational(user_message):
-            body = (
-                "You are Remi, a helpful assistant.\n"
-                "Answer the user's message conversationally and helpfully.\n"
-                f"{MARKDOWN_INSTRUCTION}\n\n"
-            )
-            gemini_prompt = _append_history_to_prompt(body, history, user_message)
-            return conv, gemini_prompt, "", history, None, "document", False, None
+    source, prompt_body, use_search, general_chat, fixed_response = _resolve_retrieval_path(
+        db, conversation_id, rag_context, user_message
+    )
 
-        body = (
-            "You are Remi, a helpful assistant.\n"
-            "Answer this question thoroughly using web search.\n"
-            f"{MARKDOWN_INSTRUCTION}\n\n"
-            f"Question: {user_message}"
-        )
-        gemini_prompt = _finalize_prompt_with_history(body, history, user_message)
-        return conv, gemini_prompt, "", history, None, "web", True, None
+    if fixed_response:
+        gemini_prompt = ""
+    else:
+        gemini_prompt = _append_history_to_prompt(prompt_body, history, user_message)
 
-    prompt_body, use_search, source = _build_prompt_and_search_flag(rag_context, user_message)
-    gemini_prompt = _finalize_prompt_with_history(prompt_body, history, user_message)
-    return conv, gemini_prompt, rag_context, history, None, source, use_search, None
+    return conv, gemini_prompt, rag_context, history, None, source, use_search, fixed_response
 
 
 def _fallback_assistant_content(
@@ -817,10 +943,7 @@ def _openai_assistant_content(
 
 
 def iter_assistant_chunks(
-    db: Session,
-    conversation_id: int,
-    user_id: int,
-    user_message: str,
+    db: Session, conversation_id: int, user_id: int, user_message: str,
     stream_meta: Optional[dict] = None,
 ) -> Iterator[str]:
     """Yield assistant reply text chunks (Gemini stream, or one-shot fallback/OpenAI)."""
@@ -1063,7 +1186,7 @@ def get_processed_file_ids(db: Session, conversation_id: int) -> List[str]:
 
 def build_rag_context(db: Session, conversation_id: int, user_message: str) -> str:
     """
-    Retrieve the most relevant document chunks for the user message via FAISS search.
+    Retrieve the most relevant document chunks for the user message via vector search.
     Returns an empty string if no processed files exist for this conversation.
     """
     try:
