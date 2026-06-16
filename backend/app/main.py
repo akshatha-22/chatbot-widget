@@ -31,8 +31,9 @@ async def _refresh_cloudflare_ranges_periodically() -> None:
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     apply_startup_migrations()
-    await asyncio.to_thread(load_cloudflare_ip_ranges)
+    # Do not block startup on external Cloudflare fetch — health checks must pass quickly.
     refresh_task = asyncio.create_task(_refresh_cloudflare_ranges_periodically())
+    asyncio.create_task(asyncio.to_thread(load_cloudflare_ip_ranges))
     try:
         yield
     finally:
