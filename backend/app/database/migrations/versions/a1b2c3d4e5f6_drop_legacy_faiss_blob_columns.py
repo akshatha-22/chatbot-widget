@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "a1b2c3d4e5f6"
-down_revision = "79472c66e251"
+down_revision = "39bbe74f12ff"
 branch_labels = None
 depends_on = None
 
@@ -19,6 +19,9 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     insp = sa.inspect(bind)
+    if "uploaded_files" not in insp.get_table_names():
+        return
+
     columns = {col["name"] for col in insp.get_columns("uploaded_files")}
 
     if bind.dialect.name == "sqlite":

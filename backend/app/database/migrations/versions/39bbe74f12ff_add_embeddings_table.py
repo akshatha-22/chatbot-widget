@@ -17,7 +17,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+
+    if "embeddings" in insp.get_table_names():
+        return
+
+    if bind.dialect.name == "postgresql":
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     op.create_table(
         "embeddings",
@@ -33,11 +40,18 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
     )
 
-    op.execute("ALTER TABLE embeddings ADD COLUMN embedding vector(768)")
+    if bind.dialect.name == "postgresql":
+        op.execute("ALTER TABLE embeddings ADD COLUMN embedding vector(768)")
+    else:
+        op.add_column("embeddings", sa.Column("embedding", sa.Text(), nullable=True))
 
     op.create_index("embeddings_file_id_idx", "embeddings", ["file_id"])
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if "embeddings" not in insp.get_table_names():
+        return
     op.drop_index("embeddings_file_id_idx", table_name="embeddings")
     op.drop_table("embeddings")
