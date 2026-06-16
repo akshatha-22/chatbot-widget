@@ -36,9 +36,10 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
             raise ValueError(f"No text extracted from {filename}")
 
         print(f"[EMBED] Extracted {len(extracted_text)} characters")
-        print(f"[EMBED] Creating FAISS index for {file_id}")
-        vector_store_service.chunk_and_store(file_id, extracted_text, db=db)
-        print(f"[EMBED] FAISS index created successfully")
+        print(f"[EMBED] Creating pgvector embeddings for {file_id}")
+        if not vector_store_service.chunk_and_store(file_id, extracted_text, db=db):
+            raise ValueError(f"Failed to store embeddings for {filename}")
+        print(f"[EMBED] Embeddings stored successfully")
 
         db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if db_file:
@@ -206,11 +207,9 @@ def delete_uploaded_file(
         )
 
     stored_path = db_file.file_path
+    vector_store_service.delete_file_data(file_id, db=db)
     db.delete(db_file)
     db.commit()
-
-    # Best-effort cleanup after DB row is gone (idempotent for retries).
-    vector_store_service.delete_file_data(file_id)
     if stored_path and os.path.isfile(stored_path):
         try:
             os.remove(stored_path)

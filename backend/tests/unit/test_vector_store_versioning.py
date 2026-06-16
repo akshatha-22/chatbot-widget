@@ -1,4 +1,4 @@
-"""Unit tests for FAISS embedding model versioning."""
+"""Unit tests for embedding model versioning."""
 
 from unittest.mock import patch
 
@@ -7,7 +7,10 @@ from app.services import vector_store_service
 
 
 def test_get_current_embedding_model_version():
-    assert vector_store_service.get_current_embedding_model_version() == "all-MiniLM-L6-v2-v1.0"
+    assert (
+        vector_store_service.get_current_embedding_model_version()
+        == "gemini-text-embedding-004-v1"
+    )
 
 
 def test_is_index_stale_when_version_missing(db_session):
@@ -17,7 +20,6 @@ def test_is_index_stale_when_version_missing(db_session):
         filename="a.txt",
         file_path="/tmp/a.txt",
         status="processed",
-        chunks_blob=b"chunks",
         embedding_model_version=None,
     )
     db_session.add(row)
@@ -58,11 +60,10 @@ def test_reindex_file_updates_version(db_session, monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "app.services.vector_store_service.chunk_and_store",
-        lambda file_id, text, db=None: None,
+        lambda file_id, text, db=None, **kwargs: True,
     )
 
-    with patch.object(vector_store_service, "clear_memory_cache"):
-        vector_store_service.reindex_file(db_session, "file-3")
+    vector_store_service.reindex_file(db_session, "file-3")
 
     db_session.refresh(row)
     assert row.status == "processed"

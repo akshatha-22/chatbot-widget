@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from app.schemas.base import BaseSchema
 
 class MessageBase(BaseSchema):
@@ -18,3 +18,5 @@ class MessageResponse(MessageBase):
     pdf_content: Optional[str] = None
     pdf_filename: Optional[str] = None
     cache_hit: bool = False
+    source: str = "document"
+    links: List[dict] = []

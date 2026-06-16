@@ -36,7 +36,7 @@ tests/
 │   ├── test_audit_service.py       # Audit log writes
 │   ├── test_auth_rate_limit.py     # Login/signup 429 per IP
 │   ├── test_vector_store_versioning.py  # embedding_model_version + reindex
-│   ├── test_admin_faiss_health.py  # GET /admin/faiss-health
+│   ├── test_admin_embedding_health.py  # GET /admin/embedding-health
 │   ├── test_file_delete.py         # Delete atomicity, 403 non-owner
 │   └── test_network.py             # Cloudflare IP validation
 └── README.md                # This file
@@ -118,7 +118,7 @@ python -m pytest tests/test_api_auth.py -v
 - Per-user response cache keys + `cache_hit`
 - Gemini quota UTC reset + `reset_at` in 429
 - Audit log background writes
-- FAISS `embedding_model_version` + `/admin/faiss-health`
+- Embedding `embedding_model_version` + `/admin/embedding-health`
 - Cloudflare IP range validation (`CLOUDFLARE_ONLY`)
 - `get_real_ip()` proxy header precedence
 

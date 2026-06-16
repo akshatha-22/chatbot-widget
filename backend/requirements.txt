@@ -8,11 +8,8 @@ alembic==1.12.1
 psycopg2-binary==2.9.9
 pymysql==1.1.0
 
-# Vector Store & Embeddings
-faiss-cpu>=1.8.0
-huggingface_hub>=0.34.0
-sentence-transformers>=2.7.0
-numpy>=1.26.0
+# Vector Store — Gemini embeddings + pgvector (no local ML models)
+pgvector==0.3.6
 
 # MIME magic-byte detection
 python-magic==0.4.27

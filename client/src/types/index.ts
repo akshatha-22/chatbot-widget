@@ -4,6 +4,8 @@ export interface Conversation {
   created_at: string;
 }
 
+export type { TMessageSource, TExternalLink, TMessage } from './chat';
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -12,6 +14,9 @@ export interface Message {
   has_pdf?: boolean;
   pdf_content?: string | null;
   pdf_filename?: string | null;
+  cache_hit?: boolean;
+  source?: 'document' | 'both' | 'web' | 'none' | 'catalog' | null;
+  links?: import('./chat').TExternalLink[];
 }
 
 export interface UploadedFile {

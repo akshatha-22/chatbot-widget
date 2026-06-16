@@ -1,5 +1,6 @@
 import apiClient from './client'
 import { readRateLimitFromResponse } from './rateLimit'
+import type { TMessageSource } from '../types/chat'
 
 export interface Conversation {
   id: string
@@ -17,6 +18,15 @@ export interface Message {
   has_pdf?: boolean
   pdf_content?: string | null
   pdf_filename?: string | null
+  cache_hit?: boolean
+  source?: TMessageSource | 'catalog' | null
+  links?: { url: string; title: string }[]
+}
+
+function mapMessageSource(source?: string | null): TMessageSource | null | undefined {
+  if (source == null) return null
+  if (source === 'catalog') return 'document'
+  return source as TMessageSource
 }
 
 // baseURL is already http://localhost:8000/api/v1
@@ -46,6 +56,8 @@ export async function getConversationMessages(
     has_pdf: m.has_pdf ?? false,
     pdf_content: m.pdf_content ?? null,
     pdf_filename: m.pdf_filename ?? null,
+    source: mapMessageSource(m.source) ?? undefined,
+    links: m.links ?? [],
   }))
 }
 
@@ -80,6 +92,9 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
       has_pdf?: boolean
       pdf_content?: string | null
       pdf_filename?: string | null
+      cache_hit?: boolean
+      source?: TMessageSource | 'catalog' | null
+      links?: { url: string; title: string }[]
     }
     if (parsed.event === 'done' && parsed.content != null) {
       return {
@@ -92,6 +107,9 @@ function parseSsePayload(raw: string): { type: 'chunk'; text: string } | { type:
           has_pdf: parsed.has_pdf ?? false,
           pdf_content: parsed.pdf_content ?? null,
           pdf_filename: parsed.pdf_filename ?? null,
+          cache_hit: parsed.cache_hit ?? false,
+          source: mapMessageSource(parsed.source) ?? 'document',
+          links: parsed.links ?? [],
         },
       }
     }
@@ -219,6 +237,8 @@ export async function sendMessage(
     has_pdf: assistant.has_pdf ?? false,
     pdf_content: assistant.pdf_content ?? null,
     pdf_filename: assistant.pdf_filename ?? null,
+    source: mapMessageSource(assistant.source) ?? 'document',
+    links: assistant.links ?? [],
   }
 }
 
@@ -278,6 +298,8 @@ export async function getConversationDetail(
       has_pdf: m.has_pdf ?? false,
       pdf_content: m.pdf_content ?? null,
       pdf_filename: m.pdf_filename ?? null,
+      source: mapMessageSource(m.source) ?? undefined,
+      links: m.links ?? [],
     })),
   }
 }
