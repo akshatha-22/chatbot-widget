@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import threading
 import traceback
 from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, status
@@ -52,18 +53,21 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
         db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if db_file:
             db_file.status = "processed"
+            db_file.processing_error = None
             db.commit()
             print(f"[EMBED] Status updated to processed")
         else:
             print(f"[EMBED] WARNING: file {file_id} not found in DB")
     except Exception as e:
-        print(f"[EMBED] ERROR: {e}")
+        error_msg = str(e)
+        print(f"[EMBED] ERROR: {error_msg}")
         traceback.print_exc()
         try:
             db.rollback()
             db_file = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
             if db_file:
                 db_file.status = "failed"
+                db_file.processing_error = error_msg[:500]
                 db.commit()
                 print(f"[EMBED] Status updated to failed")
         except Exception as db_err:
@@ -71,6 +75,17 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
     finally:
         db.close()
         print(f"[EMBED] DB session closed")
+
+
+def _run_embedding_in_thread(file_id: str, file_path: str, filename: str) -> None:
+    """Run embedding off the asyncio event loop so health checks stay responsive."""
+    thread = threading.Thread(
+        target=process_file_embedding,
+        args=(file_id, file_path, filename),
+        daemon=True,
+        name=f"embed-{file_id[:8]}",
+    )
+    thread.start()
 
 
 @router.post("/{conversation_id}/files", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
@@ -135,7 +150,7 @@ async def upload_file(
         db.refresh(db_file)
     else:
         background_tasks.add_task(
-            process_file_embedding,
+            _run_embedding_in_thread,
             file_id,
             file_path,
             filename,

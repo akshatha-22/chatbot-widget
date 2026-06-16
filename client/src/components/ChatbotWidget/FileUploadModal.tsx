@@ -263,6 +263,10 @@ export default function FileUploadModal({
                 {rows.map((r) => {
                   const ext = getUploadExtension(r.file.name)
                   const status = rowStatus(r)
+                  const live = r.uploaded
+                    ? files.find((f) => f.id === r.uploaded!.id)
+                    : undefined
+                  const failureDetail = live?.processing_error?.trim()
                   return (
                     <div
                       key={r.id}
@@ -302,9 +306,14 @@ export default function FileUploadModal({
                           </div>
                         )}
                         {!r.uploading && status === 'failed' && (
-                          <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
-                            <X size={12} aria-hidden />
-                            Processing failed — delete and re-upload
+                          <div className="mt-1 text-xs text-red-500">
+                            <div className="flex items-center gap-1">
+                              <X size={12} aria-hidden />
+                              Processing failed — delete and re-upload
+                            </div>
+                            {failureDetail && (
+                              <p className="mt-0.5 text-[11px] text-red-600">{failureDetail}</p>
+                            )}
                           </div>
                         )}
                         {!r.uploading && r.error && (

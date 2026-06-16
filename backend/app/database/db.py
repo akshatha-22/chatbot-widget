@@ -84,6 +84,7 @@ class UploadedFile(Base):
     status = Column(String(50), default="pending")  # pending → processed
     embedding_model_version = Column(String(100), nullable=True)
     raw_text_blob = Column(Text, nullable=True)
+    processing_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     conversation = relationship("Conversation", back_populates="files")

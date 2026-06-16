@@ -1,10 +1,15 @@
 import csv
+import logging
 import os
 from typing import List, Optional
 
+logger = logging.getLogger(__name__)
+
+MAX_PDF_OCR_BYTES = 20 * 1024 * 1024
+
 
 def is_row_chunked_format(filename: str) -> bool:
-    """True for spreadsheet formats indexed one row per FAISS chunk."""
+    """True for spreadsheet formats indexed one row per chunk."""
     ext = os.path.splitext(filename.lower())[1]
     return ext in (".xlsx", ".xls", ".csv")
 
@@ -94,6 +99,106 @@ def parse_row_chunks(file_path: str, filename: str) -> Optional[List[str]]:
     return None
 
 
+def _extract_pdf_pypdf2(file_path: str) -> str:
+    import PyPDF2
+
+    parts: List[str] = []
+    with open(file_path, "rb") as handle:
+        reader = PyPDF2.PdfReader(handle)
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                parts.append(page_text)
+    return "\n".join(parts)
+
+
+def _extract_pdf_pymupdf(file_path: str) -> str:
+    import fitz
+
+    parts: List[str] = []
+    with fitz.open(file_path) as doc:
+        for page in doc:
+            text = page.get_text("text")
+            if text and text.strip():
+                parts.append(text.strip())
+    return "\n".join(parts)
+
+
+def _extract_pdf_gemini_ocr(file_path: str, filename: str) -> str:
+    """OCR fallback for image-only PDFs (e.g. flipbook catalogues) via Gemini."""
+    from app.config import settings
+
+    if not settings.gemini_configured():
+        return ""
+
+    file_size = os.path.getsize(file_path)
+    if file_size > MAX_PDF_OCR_BYTES:
+        raise ValueError(
+            f"{filename} is too large for automatic OCR ({file_size // (1024 * 1024)}MB). "
+            "Try a smaller PDF or a text-based export."
+        )
+
+    from google import genai
+    from google.genai import types
+
+    with open(file_path, "rb") as handle:
+        pdf_bytes = handle.read()
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
+    model = settings.GEMINI_MODEL.removeprefix("models/")
+    response = client.models.generate_content(
+        model=model,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                    types.Part.from_text(
+                        text=(
+                            "Extract all readable text from this PDF document. "
+                            "Include product names, part numbers, descriptions, and tables. "
+                            "Return plain text only — no markdown code fences."
+                        )
+                    ),
+                ],
+            )
+        ],
+    )
+    text = (getattr(response, "text", None) or "").strip()
+    if text:
+        logger.info("Gemini OCR extracted %s characters from %s", len(text), filename)
+    return text
+
+
+def _extract_pdf_text(file_path: str, filename: str) -> str:
+    """Try PyPDF2, then PyMuPDF, then Gemini OCR for image-only PDFs."""
+    extractors = (
+        ("PyPDF2", _extract_pdf_pypdf2),
+        ("PyMuPDF", _extract_pdf_pymupdf),
+    )
+    for name, extractor in extractors:
+        try:
+            text = extractor(file_path).strip()
+            if text:
+                logger.info("PDF text via %s: %s chars from %s", name, len(text), filename)
+                return text
+        except Exception as exc:
+            logger.warning("%s extraction failed for %s: %s", name, filename, exc)
+
+    try:
+        text = _extract_pdf_gemini_ocr(file_path, filename).strip()
+        if text:
+            return text
+    except Exception as exc:
+        logger.error("Gemini OCR failed for %s: %s", filename, exc)
+        raise ValueError(f"Could not read text from PDF '{filename}': {exc}") from exc
+
+    raise ValueError(
+        f"No readable text found in '{filename}'. "
+        "This PDF may be blank or image-only; try exporting a text-based PDF."
+    )
+
+
 def extract_text(file_path: str, filename: str) -> str:
     """
     Extracts plain text content from a file based on its extension.
@@ -110,16 +215,7 @@ def extract_text(file_path: str, filename: str) -> str:
 
     try:
         if ext == ".pdf":
-            import PyPDF2
-
-            text = ""
-            with open(file_path, "rb") as handle:
-                reader = PyPDF2.PdfReader(handle)
-                for page in reader.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-            return text
+            return _extract_pdf_text(file_path, filename)
 
         if ext == ".docx":
             import docx

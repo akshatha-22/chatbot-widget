@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 EMBEDDING_VERSION = "gemini-embedding-001-v768"
 EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 32
+MAX_CHUNKS_PER_FILE = 400
 
 
 def _embed_config(*, query: bool = False):
@@ -181,6 +182,39 @@ def split_text(
     return chunks
 
 
+def _resolve_index_chunks(
+    source_text: str,
+    chunks: Optional[List[str]],
+    chunk_size: int,
+    chunk_overlap: int,
+) -> List[str]:
+    """Cap chunk count so large PDFs finish within Railway timeouts."""
+    resolved = chunks if chunks is not None else split_text(source_text, chunk_size, chunk_overlap)
+    if len(resolved) <= MAX_CHUNKS_PER_FILE:
+        return resolved
+
+    if chunks is not None:
+        logger.warning(
+            "Capping row chunks from %s to %s for indexing",
+            len(resolved),
+            MAX_CHUNKS_PER_FILE,
+        )
+        return resolved[:MAX_CHUNKS_PER_FILE]
+
+    size = chunk_size
+    while len(resolved) > MAX_CHUNKS_PER_FILE and size < 8000:
+        size = int(size * 1.5)
+        resolved = split_text(source_text, size, chunk_overlap)
+    if len(resolved) > MAX_CHUNKS_PER_FILE:
+        resolved = resolved[:MAX_CHUNKS_PER_FILE]
+    logger.info(
+        "Reduced chunk count to %s for indexing (chunk_size=%s)",
+        len(resolved),
+        size,
+    )
+    return resolved
+
+
 def _normalize_exact_key(value: str) -> str:
     """Lowercase and strip hyphens, spaces, underscores for part-number matching."""
     return re.sub(r"[\s\-_]+", "", (value or "").lower())
@@ -284,8 +318,8 @@ def chunk_and_store(
         return False
 
     try:
-        resolved_chunks = (
-            chunks if chunks is not None else split_text(source_text, chunk_size, chunk_overlap)
+        resolved_chunks = _resolve_index_chunks(
+            source_text, chunks, chunk_size, chunk_overlap
         )
         if not resolved_chunks:
             logger.warning("No chunks for file %s", file_id)
