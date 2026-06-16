@@ -21,10 +21,12 @@ RUN pip install --upgrade pip setuptools wheel \
     && pip install -r requirements-docker.txt
 
 COPY alembic.ini ./
+COPY docker-entrypoint.sh ./
 COPY app ./app
 
-RUN mkdir -p data/uploads
+RUN mkdir -p data/uploads \
+    && chmod +x docker-entrypoint.sh
 
 EXPOSE 8000
 
-CMD sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+CMD ["./docker-entrypoint.sh"]

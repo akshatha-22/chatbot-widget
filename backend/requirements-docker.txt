@@ -1,5 +1,4 @@
-# Docker / Railway image — core app + DB + vector deps.
-# torch + sentence-transformers are installed in separate Dockerfile layers (CPU wheels).
+# Docker / Railway image — core app + DB + vector deps + migrations.
 
 -r requirements-ci-core.txt
 

@@ -17,18 +17,39 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "messages",
-        sa.Column("source", sa.String(length=50), server_default="document", nullable=False),
-    )
-    op.add_column(
-        "messages",
-        sa.Column("links", sa.JSON(), server_default="[]", nullable=True),
-    )
-    op.add_column("uploaded_files", sa.Column("raw_text_blob", sa.Text(), nullable=True))
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    message_cols = {col["name"] for col in insp.get_columns("messages")}
+    file_cols = {col["name"] for col in insp.get_columns("uploaded_files")}
+
+    if "source" not in message_cols:
+        op.add_column(
+            "messages",
+            sa.Column(
+                "source",
+                sa.String(length=50),
+                server_default="document",
+                nullable=False,
+            ),
+        )
+    if "links" not in message_cols:
+        op.add_column(
+            "messages",
+            sa.Column("links", sa.JSON(), server_default="[]", nullable=True),
+        )
+    if "raw_text_blob" not in file_cols:
+        op.add_column("uploaded_files", sa.Column("raw_text_blob", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("uploaded_files", "raw_text_blob")
-    op.drop_column("messages", "links")
-    op.drop_column("messages", "source")
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    message_cols = {col["name"] for col in insp.get_columns("messages")}
+    file_cols = {col["name"] for col in insp.get_columns("uploaded_files")}
+
+    if "raw_text_blob" in file_cols:
+        op.drop_column("uploaded_files", "raw_text_blob")
+    if "links" in message_cols:
+        op.drop_column("messages", "links")
+    if "source" in message_cols:
+        op.drop_column("messages", "source")
