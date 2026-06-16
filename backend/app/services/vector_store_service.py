@@ -11,7 +11,7 @@ import logging
 import re
 from typing import List, Optional
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_VERSION = "gemini-text-embedding-004-v1"
 EMBEDDING_DIMENSIONS = 768
+EMBED_BATCH_SIZE = 32
 
 
 def get_current_embedding_model_version() -> str:
@@ -54,6 +55,57 @@ def _extract_embedding_values(response) -> List[float]:
         return []
     values = getattr(embeddings[0], "values", None)
     return list(values) if values else []
+
+
+def _extract_batch_embeddings(response) -> List[List[float]]:
+    embeddings = getattr(response, "embeddings", None) or []
+    out: List[List[float]] = []
+    for item in embeddings:
+        values = getattr(item, "values", None)
+        out.append(list(values) if values else [])
+    return out
+
+
+def _get_embeddings_batch(
+    chunks: List[str], batch_size: int = EMBED_BATCH_SIZE
+) -> List[List[float]]:
+    """
+    Embed many chunks via Gemini batch API (fewer round-trips than one-by-one).
+    Returns one vector per input chunk; failed slots are empty lists.
+    """
+    if not chunks:
+        return []
+    if not _ensure_genai_configured():
+        return [[] for _ in chunks]
+
+    from google.genai import types
+
+    results: List[List[float]] = []
+    client = _genai_client()
+    config = types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
+
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start : start + batch_size]
+        try:
+            response = client.models.embed_content(
+                model=_embedding_model_id(),
+                contents=batch,
+                config=config,
+            )
+            batch_vectors = _extract_batch_embeddings(response)
+            if len(batch_vectors) != len(batch):
+                logger.warning(
+                    "Embedding batch size mismatch: sent %s, got %s",
+                    len(batch),
+                    len(batch_vectors),
+                )
+                batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
+            results.extend(batch_vectors)
+        except Exception as exc:
+            logger.error("Gemini batch embedding failed: %s", exc)
+            results.extend([[] for _ in batch])
+
+    return results
 
 
 def _get_embedding(text_input: str) -> List[float]:
@@ -170,7 +222,7 @@ def _persist_raw_text(
     row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
     if row:
         row.raw_text_blob = raw_text
-        db.commit()
+        db.flush()
 
 
 def _is_index_stale(db: Session, file_id: str) -> bool:
@@ -241,9 +293,24 @@ def chunk_and_store(
             {"fid": file_id},
         )
 
+        embeddings = _get_embeddings_batch(resolved_chunks)
         stored = 0
-        for index, chunk in enumerate(resolved_chunks):
-            embedding = _get_embedding(chunk)
+        pg_insert = text(
+            """
+            INSERT INTO embeddings
+            (file_id, chunk_text, embedding, chunk_index)
+            VALUES (:file_id, :chunk_text, CAST(:embedding AS vector), :chunk_index)
+            """
+        )
+        sqlite_insert = text(
+            """
+            INSERT INTO embeddings
+            (file_id, chunk_text, embedding, chunk_index)
+            VALUES (:file_id, :chunk_text, :embedding, :chunk_index)
+            """
+        )
+
+        for index, (chunk, embedding) in enumerate(zip(resolved_chunks, embeddings)):
             if not embedding:
                 logger.warning(
                     "Empty embedding for chunk %s of file %s — skipping",
@@ -252,39 +319,16 @@ def chunk_and_store(
                 )
                 continue
 
+            params = {
+                "file_id": file_id,
+                "chunk_text": chunk,
+                "embedding": json.dumps(embedding),
+                "chunk_index": index,
+            }
             if _is_postgres(db):
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO embeddings
-                        (file_id, chunk_text, embedding, chunk_index)
-                        VALUES (:file_id, :chunk_text,
-                                :embedding::vector, :chunk_index)
-                        """
-                    ),
-                    {
-                        "file_id": file_id,
-                        "chunk_text": chunk,
-                        "embedding": json.dumps(embedding),
-                        "chunk_index": index,
-                    },
-                )
+                db.execute(pg_insert, params)
             else:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO embeddings
-                        (file_id, chunk_text, embedding, chunk_index)
-                        VALUES (:file_id, :chunk_text, :embedding, :chunk_index)
-                        """
-                    ),
-                    {
-                        "file_id": file_id,
-                        "chunk_text": chunk,
-                        "embedding": json.dumps(embedding),
-                        "chunk_index": index,
-                    },
-                )
+                db.execute(sqlite_insert, params)
             stored += 1
 
         db.execute(
@@ -352,13 +396,13 @@ def search(
             text(
                 """
                 SELECT chunk_text,
-                       1 - (embedding <=> :query_vec::vector) AS similarity
+                       1 - (embedding <=> CAST(:query_vec AS vector)) AS similarity
                 FROM embeddings
-                WHERE file_id = ANY(:file_ids)
+                WHERE file_id IN :file_ids
                 ORDER BY similarity DESC
                 LIMIT :top_k
                 """
-            ),
+            ).bindparams(bindparam("file_ids", expanding=True)),
             {
                 "query_vec": json.dumps(query_embedding),
                 "file_ids": file_ids,
@@ -388,12 +432,12 @@ def _exact_string_search(
             text(
                 """
                 SELECT chunk_text FROM embeddings
-                WHERE file_id = ANY(:file_ids)
+                WHERE file_id IN :file_ids
                 AND LOWER(REPLACE(REPLACE(chunk_text, '-', ''), ' ', ''))
                     LIKE :pattern
                 LIMIT 3
                 """
-            ),
+            ).bindparams(bindparam("file_ids", expanding=True)),
             {
                 "file_ids": file_ids,
                 "pattern": f"%{normalized}%",
@@ -421,11 +465,11 @@ def _keyword_fallback(
             text(
                 """
                 SELECT chunk_text FROM embeddings
-                WHERE file_id = ANY(:file_ids)
+                WHERE file_id IN :file_ids
                 AND LOWER(chunk_text) LIKE :pattern
                 LIMIT :top_k
                 """
-            ),
+            ).bindparams(bindparam("file_ids", expanding=True)),
             {
                 "file_ids": file_ids,
                 "pattern": f"%{pattern}%",

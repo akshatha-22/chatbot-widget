@@ -1,7 +1,6 @@
 import logging
 import os
 import shutil
-import threading
 import traceback
 from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, status
@@ -28,6 +27,8 @@ UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
 def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
     """Parse, chunk, and index a file in the background (separate DB session)."""
     print(f"[EMBED] Starting embedding for {filename} ({file_id})")
+    if not vector_store_service.gemini_embeddings_available():
+        print("[EMBED] ERROR: GEMINI_API_KEY is not configured — cannot embed files")
     db = SessionLocal()
     try:
         print(f"[EMBED] Extracting text from {filename}")
@@ -70,17 +71,6 @@ def process_file_embedding(file_id: str, file_path: str, filename: str) -> None:
     finally:
         db.close()
         print(f"[EMBED] DB session closed")
-
-
-def _run_embedding_background(file_id: str, file_path: str, filename: str) -> None:
-    """Start embedding in a daemon thread so ML work does not block the event loop."""
-    thread = threading.Thread(
-        target=process_file_embedding,
-        args=(file_id, file_path, filename),
-        daemon=True,
-        name=f"embed-{file_id[:8]}",
-    )
-    thread.start()
 
 
 @router.post("/{conversation_id}/files", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
@@ -145,7 +135,7 @@ async def upload_file(
         db.refresh(db_file)
     else:
         background_tasks.add_task(
-            _run_embedding_background,
+            process_file_embedding,
             file_id,
             file_path,
             filename,
