@@ -15,6 +15,14 @@ MARKDOWN_INSTRUCTION = (
     "**bold** for key terms, and blank lines between paragraphs."
 )
 
+DOCUMENT_ACCESS_INSTRUCTION = """
+IMPORTANT: You DO have access to this document.
+Never say "I cannot access your document."
+Never say "I don't have access to uploaded files."
+The content above IS the document content.
+If the user asks about a specific page, the page number is shown in [Page X] markers.
+"""
+
 NOT_FOUND_MESSAGE = (
     "I couldn't find information about this in your "
     "uploaded document or on the web. Try rephrasing "
@@ -391,41 +399,44 @@ def _build_prompt_and_search_flag(
 
         if quality == RAGQuality.DIRECT:
             return (
-                f"""You are Remi, a helpful assistant.
+                f"""You are Remi, a helpful assistant with access to the user's uploaded document.
 
-The document below directly answers the user's question.
-Answer using the document. Be specific and quote details.
-Do not add information from outside the document.
+The following content was extracted directly from the user's uploaded document.
+It is real document content — not web data, not your training data.
+
+Answer the user's question using ONLY the content below.
 
 {MARKDOWN_INSTRUCTION}
 
-DOCUMENT CONTEXT:
+DOCUMENT CONTENT:
 {rag_context}
 
-Question: {query}""",
+Question: {query}
+
+{DOCUMENT_ACCESS_INSTRUCTION}""",
                 False,
                 "document",
             )
 
         if quality == RAGQuality.PARTIAL:
             return (
-                f"""You are Remi, a helpful assistant.
+                f"""You are Remi, a helpful assistant with access to the user's uploaded document.
 
-The document has some relevant information but may be
-incomplete. Do the following:
+The following content was extracted from the user's uploaded document.
+It may be incomplete for this question. Do the following:
 
-1. First share what the document says — label it
-   "From your document:"
-2. Then search the web and add what you find — label it
-   "From the web:"
+1. First share what the document says — label it "From your document:"
+2. Then search the web and add what you find — label it "From the web:"
 3. Combine both into one complete answer.
 
 {MARKDOWN_INSTRUCTION}
 
-DOCUMENT CONTEXT:
+DOCUMENT CONTENT:
 {rag_context}
 
-Question: {query}""",
+Question: {query}
+
+{DOCUMENT_ACCESS_INSTRUCTION}""",
                 True,
                 "both",
             )
@@ -1070,9 +1081,14 @@ def build_rag_context(db: Session, conversation_id: int, user_message: str) -> s
         file_ids = [f.id for f in files]
         print(f"[RAG] Searching {len(file_ids)} files")
 
-        chunks = vector_store_service.search(file_ids, user_message, top_k=5, db=db)
+        top_k = (
+            vector_store_service.PAGE_QUERY_TOP_K
+            if vector_store_service._extract_page_number(user_message)
+            else 5
+        )
+        chunks = vector_store_service.search(file_ids, user_message, top_k=top_k, db=db)
         if not chunks:
-            print("[RAG] No chunks returned from FAISS")
+            print("[RAG] No chunks returned from search")
             return ""
 
         return "\n\n".join(chunks)

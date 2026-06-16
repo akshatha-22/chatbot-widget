@@ -22,6 +22,8 @@ EMBEDDING_VERSION = "gemini-embedding-001-v768"
 EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 32
 MAX_CHUNKS_PER_FILE = 400
+PAGE_QUERY_TOP_K = 15
+PAGE_MARKER_PATTERN = re.compile(r"\[PAGE (\d+)\]", re.IGNORECASE)
 
 
 def _embed_config(*, query: bool = False):
@@ -198,14 +200,93 @@ def split_text(
     return chunks
 
 
+def split_text_with_pages(
+    text: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+) -> List[dict]:
+    """
+    Split page-aware text into chunks.
+    Each chunk dict has text, page, and chunk_index.
+    """
+    chunks: List[dict] = []
+    chunk_index = 0
+    parts = PAGE_MARKER_PATTERN.split(text)
+
+    i = 1
+    while i < len(parts) - 1:
+        page_num = int(parts[i])
+        page_content = parts[i + 1].strip()
+        i += 2
+
+        if not page_content:
+            continue
+
+        start = 0
+        while start < len(page_content):
+            end = start + chunk_size
+            chunk_text = page_content[start:end].strip()
+            if chunk_text:
+                chunks.append(
+                    {
+                        "text": f"[Page {page_num}] {chunk_text}",
+                        "page": page_num,
+                        "chunk_index": chunk_index,
+                    }
+                )
+                chunk_index += 1
+            start += max(chunk_size - chunk_overlap, 1)
+
+    return chunks
+
+
+def _extract_page_number(query: str) -> int | None:
+    """Detect page number references in a user query."""
+    patterns = [
+        r"page\s+number\s+(\d+)",
+        r"page\s*[\.\#]?\s*(\d+)",
+        r"p\.\s*(\d+)",
+        r"pg\s*\.?\s*(\d+)",
+    ]
+    lowered = query.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def _resolve_index_chunks(
     source_text: str,
     chunks: Optional[List[str]],
     chunk_size: int,
     chunk_overlap: int,
-) -> List[str]:
+) -> List[dict]:
     """Cap chunk count so large PDFs finish within Railway timeouts."""
-    resolved = chunks if chunks is not None else split_text(source_text, chunk_size, chunk_overlap)
+    if chunks is not None:
+        resolved = [
+            {
+                "text": f"[Page 1] {chunk}",
+                "page": 1,
+                "chunk_index": index,
+            }
+            for index, chunk in enumerate(chunks)
+            if chunk.strip()
+        ]
+    elif PAGE_MARKER_PATTERN.search(source_text):
+        resolved = split_text_with_pages(source_text, chunk_size, chunk_overlap)
+    else:
+        resolved = [
+            {
+                "text": f"[Page 1] {chunk}",
+                "page": 1,
+                "chunk_index": index,
+            }
+            for index, chunk in enumerate(
+                split_text(source_text, chunk_size, chunk_overlap)
+            )
+        ]
+
     if len(resolved) <= MAX_CHUNKS_PER_FILE:
         return resolved
 
@@ -220,7 +301,19 @@ def _resolve_index_chunks(
     size = chunk_size
     while len(resolved) > MAX_CHUNKS_PER_FILE and size < 8000:
         size = int(size * 1.5)
-        resolved = split_text(source_text, size, chunk_overlap)
+        if PAGE_MARKER_PATTERN.search(source_text):
+            resolved = split_text_with_pages(source_text, size, chunk_overlap)
+        else:
+            resolved = [
+                {
+                    "text": f"[Page 1] {chunk}",
+                    "page": 1,
+                    "chunk_index": index,
+                }
+                for index, chunk in enumerate(
+                    split_text(source_text, size, chunk_overlap)
+                )
+            ]
     if len(resolved) > MAX_CHUNKS_PER_FILE:
         resolved = resolved[:MAX_CHUNKS_PER_FILE]
     logger.info(
@@ -347,37 +440,38 @@ def chunk_and_store(
             {"fid": file_id},
         )
 
-        embeddings = _get_embeddings_batch(resolved_chunks)
+        embeddings = _get_embeddings_batch([chunk["text"] for chunk in resolved_chunks])
         stored = 0
         pg_insert = text(
             """
             INSERT INTO embeddings
-            (file_id, chunk_text, embedding, chunk_index)
-            VALUES (:file_id, :chunk_text, CAST(:embedding AS vector), :chunk_index)
+            (file_id, chunk_text, embedding, chunk_index, page)
+            VALUES (:file_id, :chunk_text, CAST(:embedding AS vector), :chunk_index, :page)
             """
         )
         sqlite_insert = text(
             """
             INSERT INTO embeddings
-            (file_id, chunk_text, embedding, chunk_index)
-            VALUES (:file_id, :chunk_text, :embedding, :chunk_index)
+            (file_id, chunk_text, embedding, chunk_index, page)
+            VALUES (:file_id, :chunk_text, :embedding, :chunk_index, :page)
             """
         )
 
-        for index, (chunk, embedding) in enumerate(zip(resolved_chunks, embeddings)):
+        for chunk, embedding in zip(resolved_chunks, embeddings):
             if not embedding:
                 logger.warning(
                     "Empty embedding for chunk %s of file %s — skipping",
-                    index,
+                    chunk["chunk_index"],
                     file_id,
                 )
                 continue
 
             params = {
                 "file_id": file_id,
-                "chunk_text": chunk,
+                "chunk_text": chunk["text"],
                 "embedding": _format_pgvector(embedding),
-                "chunk_index": index,
+                "chunk_index": chunk["chunk_index"],
+                "page": chunk["page"],
             }
             if _is_postgres(db):
                 db.execute(pg_insert, params)
@@ -436,6 +530,12 @@ def search(
                 except Exception as exc:
                     logger.warning("Reindex failed for %s: %s", file_id, exc)
 
+        page_num = _extract_page_number(query)
+        if page_num is not None:
+            page_hits = _search_by_page(db, file_ids, page_num, top_k=PAGE_QUERY_TOP_K)
+            if page_hits:
+                return page_hits
+
         for file_id in file_ids:
             row = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
             if row and row.raw_text_blob:
@@ -477,6 +577,36 @@ def search(
     except Exception as exc:
         logger.error("pgvector search failed: %s", exc)
         return _keyword_fallback(db, file_ids, query, top_k)
+
+
+def _search_by_page(
+    db: Session,
+    file_ids: List[str],
+    page_num: int,
+    top_k: int,
+) -> List[str]:
+    """Return chunks from a specific page, ordered by chunk_index."""
+    try:
+        results = db.execute(
+            text(
+                """
+                SELECT chunk_text FROM embeddings
+                WHERE file_id IN :file_ids
+                AND page = :page_num
+                ORDER BY chunk_index ASC
+                LIMIT :top_k
+                """
+            ).bindparams(bindparam("file_ids", expanding=True)),
+            {
+                "file_ids": file_ids,
+                "page_num": page_num,
+                "top_k": top_k,
+            },
+        )
+        return [row.chunk_text for row in results]
+    except Exception as exc:
+        logger.error("_search_by_page failed: %s", exc)
+        return []
 
 
 def _exact_string_search(

@@ -17,7 +17,8 @@ def test_direct_sets_document_source_and_no_search():
     )
     assert use_search is False
     assert source == "document"
-    assert "directly answers" in prompt
+    assert "DOCUMENT CONTENT:" in prompt
+    assert "You DO have access to this document" in prompt
 
 
 def test_partial_sets_both_source_and_search():
