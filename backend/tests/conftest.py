@@ -122,6 +122,11 @@ def noop_vector_index_by_default(monkeypatch, request):
         "app.services.vector_store_service.chunk_and_store",
         lambda *args, **kwargs: True,
     )
+    # chunk_and_store is a no-op above — processed files have no embedding rows.
+    monkeypatch.setattr(
+        "app.services.vector_store_service.file_has_searchable_embeddings",
+        lambda db, file_id: True,
+    )
 
 
 @pytest.fixture()
