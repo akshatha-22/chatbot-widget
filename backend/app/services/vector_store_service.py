@@ -18,9 +18,18 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_VERSION = "gemini-text-embedding-004-v1"
+EMBEDDING_VERSION = "gemini-embedding-001-v768"
 EMBEDDING_DIMENSIONS = 768
 EMBED_BATCH_SIZE = 32
+
+
+def _embed_config(*, query: bool = False):
+    from google.genai import types
+
+    return types.EmbedContentConfig(
+        task_type="RETRIEVAL_QUERY" if query else "RETRIEVAL_DOCUMENT",
+        output_dimensionality=EMBEDDING_DIMENSIONS,
+    )
 
 
 def get_current_embedding_model_version() -> str:
@@ -78,11 +87,9 @@ def _get_embeddings_batch(
     if not _ensure_genai_configured():
         return [[] for _ in chunks]
 
-    from google.genai import types
-
     results: List[List[float]] = []
     client = _genai_client()
-    config = types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
+    config = _embed_config()
 
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start : start + batch_size]
@@ -117,12 +124,10 @@ def _get_embedding(text_input: str) -> List[float]:
     try:
         if not _ensure_genai_configured():
             return []
-        from google.genai import types
-
         response = _genai_client().models.embed_content(
             model=_embedding_model_id(),
             contents=text_input,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+            config=_embed_config(),
         )
         return _extract_embedding_values(response)
     except Exception as exc:
@@ -135,12 +140,10 @@ def _get_query_embedding(query: str) -> List[float]:
     try:
         if not _ensure_genai_configured():
             return []
-        from google.genai import types
-
         response = _genai_client().models.embed_content(
             model=_embedding_model_id(),
             contents=query,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
+            config=_embed_config(query=True),
         )
         return _extract_embedding_values(response)
     except Exception as exc:
@@ -264,7 +267,7 @@ def reindex_file(db: Session, file_id: str) -> None:
 
 def chunk_and_store(
     file_id: str,
-    text: str,
+    source_text: str,
     db: Optional[Session] = None,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
@@ -281,12 +284,14 @@ def chunk_and_store(
         return False
 
     try:
-        resolved_chunks = chunks if chunks is not None else split_text(text, chunk_size, chunk_overlap)
+        resolved_chunks = (
+            chunks if chunks is not None else split_text(source_text, chunk_size, chunk_overlap)
+        )
         if not resolved_chunks:
             logger.warning("No chunks for file %s", file_id)
             return False
 
-        _persist_raw_text(file_id, raw_text or text, db)
+        _persist_raw_text(file_id, raw_text or source_text, db)
 
         db.execute(
             text("DELETE FROM embeddings WHERE file_id = :fid"),

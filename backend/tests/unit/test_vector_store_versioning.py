@@ -9,7 +9,7 @@ from app.services import vector_store_service
 def test_get_current_embedding_model_version():
     assert (
         vector_store_service.get_current_embedding_model_version()
-        == "gemini-text-embedding-004-v1"
+        == "gemini-embedding-001-v768"
     )
 
 

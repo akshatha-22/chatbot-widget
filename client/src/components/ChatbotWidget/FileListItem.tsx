@@ -78,7 +78,7 @@ export default function FileListItem({
               compact ? 'text-[11px]' : 'text-xs'
             }`}
           >
-            <X size={compact ? 11 : 14} aria-hidden /> Failed — try again
+            <X size={compact ? 11 : 14} aria-hidden /> Processing failed — re-upload
           </p>
         ) : (
           <p

@@ -304,7 +304,7 @@ export default function FileUploadModal({
                         {!r.uploading && status === 'failed' && (
                           <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
                             <X size={12} aria-hidden />
-                            Failed — try again
+                            Processing failed — delete and re-upload
                           </div>
                         )}
                         {!r.uploading && r.error && (
