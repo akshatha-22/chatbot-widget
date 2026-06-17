@@ -38,7 +38,7 @@ def test_batch_embedding_splits_250_into_three_batches(monkeypatch):
     )
 
     chunks = [f"chunk {i}" for i in range(250)]
-    vectors = vector_store_service._get_embeddings_batch(chunks)
+    vectors, _error = vector_store_service._get_embeddings_batch(chunks)
     assert len(vectors) == 250
     assert calls == [100, 100, 50]
 
@@ -60,7 +60,7 @@ def test_bulk_insert_batches_rows(db_session, monkeypatch):
     monkeypatch.setattr(
         vector_store_service,
         "_get_embeddings_batch",
-        lambda chunks, batch_size=100: [[0.1] * 768 for _ in chunks],
+        lambda chunks, batch_size=100: ([[0.1] * 768 for _ in chunks], None),
     )
     monkeypatch.setattr(vector_store_service, "_is_postgres", lambda db: False)
     monkeypatch.setattr(vector_store_service, "_resolve_index_chunks", lambda *a, **k: [

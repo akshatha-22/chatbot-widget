@@ -105,7 +105,7 @@ def mock_gemini_embedding(monkeypatch, request):
     )
     monkeypatch.setattr(
         "app.services.vector_store_service._get_embeddings_batch",
-        lambda chunks, batch_size=100: [[0.1] * 768 for _ in chunks],
+        lambda chunks, batch_size=100: ([[0.1] * 768 for _ in chunks], None),
     )
     monkeypatch.setattr(
         "app.services.vector_store_service._get_query_embedding",
