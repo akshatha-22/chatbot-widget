@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from sqlalchemy import text
 
 from app.services import chat_service
@@ -158,6 +160,40 @@ def test_resolve_fallback_blocks_failed_file_with_no_processed_siblings(db_sessi
     msg = chat_service._resolve_page_query_fallback(db_session, 99, 100)
     assert msg is not None
     assert "failed to process" in msg
+
+
+def test_page_query_with_failed_upload_never_uses_web_search(
+    client, auth_headers, conversation_id, db_session
+):
+    """Regression: failed-only file + page query must not reach Gemini."""
+    from sqlalchemy import text
+
+    db_session.execute(
+        text(
+            """
+            INSERT INTO uploaded_files
+            (id, conversation_id, filename, file_path, status, pdf_page_count)
+            VALUES ('failed-gita', :cid, 'gita.pdf', '/tmp/gita.pdf', 'failed', 447)
+            """
+        ),
+        {"cid": conversation_id},
+    )
+    db_session.commit()
+
+    with patch("app.services.chat_service._call_gemini") as mock_gemini:
+        response = client.post(
+            f"/api/v1/chat/conversations/{conversation_id}/messages",
+            headers=auth_headers,
+            json={"content": "what's on page 11"},
+        )
+
+    assert response.status_code == 200
+    assistant = response.json()[1]
+    assert assistant["source"] == "document"
+    assert "failed to process" in assistant["content"].lower()
+    assert "47 of 447" not in assistant["content"]
+    assert "covers pages" not in assistant["content"].lower()
+    mock_gemini.assert_not_called()
 
 
 def test_page_not_found_message_never_uses_covers_phrase(db_session):

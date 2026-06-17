@@ -9,8 +9,11 @@ from app.services import quota_service, response_cache, vector_store_service
 from app.services.rag_quality_service import RAGQuality, classify_rag_context
 from datetime import datetime
 import json
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 MARKDOWN_INSTRUCTION = (
     "Always format your responses using markdown. Use bullet points for lists, "
@@ -682,6 +685,13 @@ def _build_page_response_or_fallback(
     Returns None if the page IS available — caller should proceed with retrieval.
     Never trusts pdf_page_count alone to claim coverage.
     """
+    logger.error(
+        "PAGE_FALLBACK_CALLED file_id=%s page=%s status=%s pdf_page_count=%s",
+        file_id,
+        requested_page,
+        file_status,
+        pdf_page_count,
+    )
     if file_status == "failed":
         return (
             "This document failed to process and has "
@@ -697,6 +707,12 @@ def _build_page_response_or_fallback(
         )
 
     indexed_set = _get_indexed_page_set(db, file_id)
+    logger.error(
+        "PAGE_FALLBACK_INDEXED file_id=%s indexed_pages=%s count=%s",
+        file_id,
+        sorted(indexed_set)[:20],
+        len(indexed_set),
+    )
 
     if not indexed_set:
         return (
@@ -736,7 +752,19 @@ def _resolve_page_query_fallback(
         .all()
     )
     if not files:
+        logger.error(
+            "PAGE_RESOLVE_NO_FILES conv=%s page=%s",
+            conversation_id,
+            requested_page,
+        )
         return None
+
+    logger.error(
+        "PAGE_RESOLVE_START conv=%s page=%s files=%s",
+        conversation_id,
+        requested_page,
+        [(f.id, f.status, f.pdf_page_count) for f in files],
+    )
 
     for uploaded in files:
         if uploaded.status == "processed" and requested_page in _get_indexed_page_set(
@@ -1047,10 +1075,55 @@ def _prepare_assistant_context(
 
     page_num = vector_store_service.detect_page_query(user_message)
     if page_num is not None:
+        logger.error(
+            "PAGE_QUERY_DETECTED conv=%s page=%s has_documents=%s file_ids=%s",
+            conversation_id,
+            page_num,
+            has_documents,
+            file_ids,
+        )
         page_fallback = _resolve_page_query_fallback(db, conversation_id, page_num)
         if page_fallback is not None:
+            logger.error(
+                "PAGE_QUERY_BLOCKED conv=%s page=%s msg=%s",
+                conversation_id,
+                page_num,
+                page_fallback[:120],
+            )
             print(f"[RAG] Page {page_num} blocked: {page_fallback[:80]}")
             return conv, "", "", history, None, "document", False, page_fallback
+
+        # Safety net: never send page queries to Gemini/web when uploads exist
+        # but none are searchable (failed, pending, or empty embeddings).
+        any_uploads = (
+            db.query(UploadedFile)
+            .filter(UploadedFile.conversation_id == conversation_id)
+            .count()
+            > 0
+        )
+        if any_uploads and not file_ids:
+            primary = (
+                db.query(UploadedFile)
+                .filter(UploadedFile.conversation_id == conversation_id)
+                .order_by(UploadedFile.created_at.desc())
+                .first()
+            )
+            if primary is not None:
+                forced = _build_page_response_or_fallback(
+                    db,
+                    primary.id,
+                    page_num,
+                    primary.pdf_page_count or 0,
+                    primary.status,
+                )
+                if forced is not None:
+                    logger.error(
+                        "PAGE_QUERY_FORCED conv=%s file_id=%s msg=%s",
+                        conversation_id,
+                        primary.id,
+                        forced[:120],
+                    )
+                    return conv, "", "", history, None, "document", False, forced
 
     if has_documents:
         if page_num is not None and file_ids:
@@ -1072,6 +1145,34 @@ def _prepare_assistant_context(
         print(f"[RAG] context preview: {rag_context[:200]}")
 
     if not has_documents:
+        if page_num is not None:
+            any_uploads = (
+                db.query(UploadedFile)
+                .filter(UploadedFile.conversation_id == conversation_id)
+                .count()
+                > 0
+            )
+            if any_uploads:
+                logger.error(
+                    "PAGE_QUERY_NO_SEARCHABLE conv=%s page=%s — blocking web search",
+                    conversation_id,
+                    page_num,
+                )
+                return (
+                    conv,
+                    "",
+                    "",
+                    history,
+                    None,
+                    "document",
+                    False,
+                    (
+                        "I couldn't retrieve that page from your uploaded "
+                        "document. It may still be processing or failed to "
+                        "index — check the Files panel and try re-uploading."
+                    ),
+                )
+
         if _is_conversational(user_message):
             body = (
                 "You are Remi, a helpful assistant.\n"
@@ -1214,10 +1315,12 @@ def iter_assistant_chunks(
         yield fixed_response
         return
 
-    cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
-    if cached:
-        yield cached
-        return
+    is_page_query = vector_store_service.detect_page_query(user_message) is not None
+    if not is_page_query:
+        cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
+        if cached:
+            yield cached
+            return
 
     if _gemini_configured():
         streamed = False
@@ -1229,9 +1332,10 @@ def iter_assistant_chunks(
             parts.append(piece)
             yield piece
         if streamed:
-            response_cache.set_cached_response(
-                user_id, user_message, rag_context, use_search, "".join(parts)
-            )
+            if not is_page_query:
+                response_cache.set_cached_response(
+                    user_id, user_message, rag_context, use_search, "".join(parts)
+                )
             return
 
     content = _openai_assistant_content(history, user_message, rag_context)
@@ -1514,18 +1618,20 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
     gemini_error: Optional[str] = None
     links: List[dict] = []
 
-    cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
-    if cached:
-        return create_message(
-            db,
-            conversation_id,
-            user_id,
-            "assistant",
-            cached,
-            cache_hit=True,
-            source=source,
-            links=[],
-        )
+    is_page_query = vector_store_service.detect_page_query(user_message) is not None
+    if not is_page_query:
+        cached = response_cache.get_cached_response(user_id, user_message, rag_context, use_search)
+        if cached:
+            return create_message(
+                db,
+                conversation_id,
+                user_id,
+                "assistant",
+                cached,
+                cache_hit=True,
+                source=source,
+                links=[],
+            )
 
     if _gemini_configured():
         assistant_content, gemini_error, response = _call_gemini(
@@ -1557,7 +1663,7 @@ def generate_assistant_response(db: Session, conversation_id: int, user_id: int,
         assistant_content = NOT_FOUND_MESSAGE
         source = "none"
 
-    if assistant_content and _gemini_configured():
+    if assistant_content and _gemini_configured() and not is_page_query:
         response_cache.set_cached_response(
             user_id, user_message, rag_context, use_search, assistant_content
         )
