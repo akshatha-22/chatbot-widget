@@ -1,4 +1,5 @@
 import csv
+import gc
 import logging
 import os
 import re
@@ -20,6 +21,27 @@ OCR_MAX_WORKERS = 4
 LARGE_PDF_PAGE_THRESHOLD = 50
 
 ProgressCallback = Callable[[str], None]
+
+
+def _close_fitz_doc(doc) -> None:
+    """Release a PyMuPDF document handle if still open."""
+    if doc is None:
+        return
+    try:
+        doc.close()
+    except Exception as exc:
+        logger.debug("PyMuPDF doc.close() failed: %s", exc)
+
+
+def _release_pixmap(pix) -> None:
+    """Drop a PyMuPDF pixmap reference so buffers can be reclaimed."""
+    if pix is None:
+        return
+    try:
+        if hasattr(pix, "clear_with"):
+            pix.clear_with()  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def is_row_chunked_format(filename: str) -> bool:
@@ -83,30 +105,33 @@ def parse_row_chunks(file_path: str, filename: str) -> Optional[List[str]]:
             import openpyxl
 
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            chunks = []
-            for sheet in wb.worksheets:
-                rows = list(sheet.iter_rows(values_only=True))
-                if not rows:
-                    continue
-                first = rows[0]
-                has_header = all(isinstance(cell, str) for cell in first if cell is not None)
-                if has_header and len(rows) > 1:
-                    headers = [
-                        str(cell).strip() if cell is not None else f"Column {i + 1}"
-                        for i, cell in enumerate(first)
-                    ]
-                    data_rows = rows[1:]
-                else:
-                    width = max(len(first), 1)
-                    headers = [f"Column {i + 1}" for i in range(width)]
-                    data_rows = rows
+            try:
+                chunks = []
+                for sheet in wb.worksheets:
+                    rows = list(sheet.iter_rows(values_only=True))
+                    if not rows:
+                        continue
+                    first = rows[0]
+                    has_header = all(isinstance(cell, str) for cell in first if cell is not None)
+                    if has_header and len(rows) > 1:
+                        headers = [
+                            str(cell).strip() if cell is not None else f"Column {i + 1}"
+                            for i, cell in enumerate(first)
+                        ]
+                        data_rows = rows[1:]
+                    else:
+                        width = max(len(first), 1)
+                        headers = [f"Column {i + 1}" for i in range(width)]
+                        data_rows = rows
 
-                for row in data_rows:
-                    padded = tuple(row) + tuple(None for _ in range(max(0, len(headers) - len(row))))
-                    chunk = _format_row_chunk(headers, padded[: len(headers)])
-                    if chunk:
-                        chunks.append(chunk)
-            return chunks
+                    for row in data_rows:
+                        padded = tuple(row) + tuple(None for _ in range(max(0, len(headers) - len(row))))
+                        chunk = _format_row_chunk(headers, padded[: len(headers)])
+                        if chunk:
+                            chunks.append(chunk)
+                return chunks
+            finally:
+                wb.close()
     except Exception as exc:
         raise ValueError(f"Error parsing structured file '{filename}': {exc}") from exc
 
@@ -249,15 +274,18 @@ def _gemini_ocr_page(file_path: str, page_num: int) -> str:
     if not settings.gemini_configured():
         return ""
 
+    doc = None
+    pix = None
+    img_bytes = b""
     try:
         import fitz
         from google import genai
         from google.genai import types
 
-        with fitz.open(file_path) as doc:
-            page = doc[page_num - 1]
-            pix = page.get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
+        doc = fitz.open(file_path)
+        page = doc[page_num - 1]
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
 
         client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
         model = settings.GEMINI_MODEL.removeprefix("models/")
@@ -282,6 +310,13 @@ def _gemini_ocr_page(file_path: str, page_num: int) -> str:
     except Exception as exc:
         logger.warning("Gemini OCR page %s failed: %s", page_num, exc)
         return ""
+    finally:
+        img_bytes = b""
+        _release_pixmap(pix)
+        pix = None
+        _close_fitz_doc(doc)
+        doc = None
+        gc.collect()
 
 
 def _extract_pymupdf_pages_parallel(
@@ -298,6 +333,7 @@ def _extract_pymupdf_pages_parallel(
         return {}
 
     results: Dict[int, str] = {}
+    doc = None
     try:
         doc = fitz.open(file_path)
 
@@ -318,10 +354,11 @@ def _extract_pymupdf_pages_parallel(
                 page_num, text = future.result()
                 if text:
                     results[page_num] = text
-
-        doc.close()
     except Exception as exc:
         logger.warning("PyMuPDF failed: %s", exc)
+    finally:
+        _close_fitz_doc(doc)
+        doc = None
 
     return results
 
@@ -424,6 +461,7 @@ def _extract_pdf_deep(
         ).items():
             if text:
                 all_pages[page_num] = text
+        gc.collect()
 
     _truncate_dense_pages(all_pages)
 
