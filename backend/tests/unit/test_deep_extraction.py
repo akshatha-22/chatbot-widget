@@ -133,6 +133,23 @@ def test_page_truncation_at_max_chars(tmp_path, monkeypatch):
     assert len(page_body.strip()) <= 3000
 
 
+def test_pymupdf_doc_closed_when_extraction_raises():
+    close_calls: list[bool] = []
+
+    class TrackingDoc:
+        def __getitem__(self, idx):
+            raise RuntimeError("page read failed")
+
+        def close(self):
+            close_calls.append(True)
+
+    with patch("fitz.open", return_value=TrackingDoc()):
+        result = file_parser_service._extract_pymupdf_pages_parallel("/fake.pdf", [1, 2])
+
+    assert result == {}
+    assert close_calls == [True]
+
+
 def test_corrupted_pdfplumber_page_skipped(tmp_path):
     path = _make_pdf(tmp_path, ["Good page"])
 
