@@ -15,6 +15,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services.gemini_errors import is_quota_exhausted, quota_exhausted_message
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,17 @@ def _get_embeddings_batch(
             except Exception as exc:
                 last_error = exc
                 logger.error("Gemini batch embedding failed (%s): %s", model_id, exc)
+                if is_quota_exhausted(exc):
+                    logger.error(
+                        "Gemini embedding quota exhausted — aborting remaining batches"
+                    )
+                    break
+
+        if is_quota_exhausted(last_error) if last_error else False:
+            if len(batch_vectors) != len(batch):
+                batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
+            results.extend(batch_vectors[: len(batch)])
+            break
 
         if len(batch_vectors) != len(batch):
             batch_vectors.extend([[] for _ in range(len(batch) - len(batch_vectors))])
@@ -542,13 +554,10 @@ def chunk_and_store(
         )
 
         insert_rows: list[dict] = []
+        skipped_empty = 0
         for chunk, embedding in zip(resolved_chunks, embeddings):
             if not embedding:
-                logger.warning(
-                    "Empty embedding for chunk %s of file %s — skipping",
-                    chunk["chunk_index"],
-                    file_id,
-                )
+                skipped_empty += 1
                 continue
             insert_rows.append(
                 {
@@ -558,6 +567,12 @@ def chunk_and_store(
                     "chunk_index": chunk["chunk_index"],
                     "page": chunk["page"],
                 }
+            )
+        if skipped_empty:
+            logger.warning(
+                "Skipped %s chunk(s) with empty embeddings for file %s",
+                skipped_empty,
+                file_id,
             )
 
         if insert_rows:
@@ -586,6 +601,8 @@ def chunk_and_store(
         db.commit()
         logger.info("Stored %s chunks for file %s", stored, file_id)
         if stored == 0:
+            if embed_error and is_quota_exhausted(embed_error):
+                raise ValueError(quota_exhausted_message(embed_error, context="embedding"))
             api_detail = embed_error or "no exception recorded (empty API response)"
             raise ValueError(
                 "Embedding API returned no vectors. "

@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     # LLM Settings
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Vision OCR for scanned PDF pages — separate from chat model to reduce quota contention.
+    GEMINI_OCR_MODEL: str = "gemini-2.0-flash-lite"
     # Default embedding model — validator maps retired names (e.g. text-embedding-004) here.
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     OPENAI_API_KEY: str = ""
@@ -191,6 +193,9 @@ class Settings(BaseSettings):
 
     def gemini_configured(self) -> bool:
         return bool((self.GEMINI_API_KEY or "").strip())
+
+    def gemini_ocr_model_id(self) -> str:
+        return (self.GEMINI_OCR_MODEL or "gemini-2.0-flash-lite").removeprefix("models/")
 
     def openai_configured(self) -> bool:
         return bool((self.OPENAI_API_KEY or "").strip())
