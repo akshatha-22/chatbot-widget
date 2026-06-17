@@ -3,6 +3,7 @@ import gc
 import logging
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -245,10 +246,12 @@ def _gemini_ocr_pages_parallel(
     results: Dict[int, str] = {}
     total = len(page_nums)
     completed = 0
+    quota_hit = threading.Event()
+    quota_errors = 0
 
     with ThreadPoolExecutor(max_workers=OCR_MAX_WORKERS) as executor:
         futures = {
-            executor.submit(_gemini_ocr_page, file_path, page_num): page_num
+            executor.submit(_gemini_ocr_page, file_path, page_num, quota_hit): page_num
             for page_num in page_nums
         }
         for future in as_completed(futures):
@@ -258,18 +261,41 @@ def _gemini_ocr_pages_parallel(
             except Exception as exc:
                 logger.warning("Gemini OCR page %s failed: %s", page_num, exc)
                 text = ""
+                if _ocr_quota_error(exc):
+                    quota_errors += 1
+                    quota_hit.set()
             if text:
                 results[page_num] = text
             completed += 1
             if on_progress and (completed == 1 or completed == total or completed % 10 == 0):
                 on_progress(f"OCR page {completed} of {total}…")
+            if quota_hit.is_set():
+                for pending in futures:
+                    pending.cancel()
+
+    if quota_errors:
+        logger.error(
+            "Gemini OCR stopped after quota errors (%s pages OCR'd before limit)",
+            len(results),
+        )
 
     return results
 
 
-def _gemini_ocr_page(file_path: str, page_num: int) -> str:
+def _ocr_quota_error(exc: BaseException) -> bool:
+    from app.services.gemini_errors import is_quota_exhausted
+
+    return is_quota_exhausted(exc)
+
+
+def _gemini_ocr_page(
+    file_path: str, page_num: int, quota_hit: Optional[threading.Event] = None
+) -> str:
     """Use Gemini vision to OCR a single scanned page (last resort)."""
     from app.config import settings
+
+    if quota_hit is not None and quota_hit.is_set():
+        return ""
 
     if not settings.gemini_configured():
         return ""
@@ -288,7 +314,7 @@ def _gemini_ocr_page(file_path: str, page_num: int) -> str:
         img_bytes = pix.tobytes("png")
 
         client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
-        model = settings.GEMINI_MODEL.removeprefix("models/")
+        model = settings.gemini_ocr_model_id()
         response = client.models.generate_content(
             model=model,
             contents=[
@@ -308,6 +334,8 @@ def _gemini_ocr_page(file_path: str, page_num: int) -> str:
         )
         return (getattr(response, "text", None) or "").strip()
     except Exception as exc:
+        if _ocr_quota_error(exc) and quota_hit is not None:
+            quota_hit.set()
         logger.warning("Gemini OCR page %s failed: %s", page_num, exc)
         return ""
     finally:

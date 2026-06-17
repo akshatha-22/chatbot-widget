@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.services import file_parser_service
+
+
+def _assert_ocr_called_with_page(mock_ocr, path: str, page_num: int) -> None:
+    mock_ocr.assert_called_once()
+    args, _kwargs = mock_ocr.call_args
+    assert args[0] == path
+    assert args[1] == page_num
+    assert isinstance(args[2], threading.Event)
 
 
 def _make_pdf(tmp_path, pages: list[str], filename: str = "doc.pdf") -> str:
@@ -84,7 +93,7 @@ def test_all_extractors_fail_triggers_gemini_ocr_page(tmp_path, monkeypatch):
                 return_value="OCR extracted content",
             ) as mock_ocr:
                 text = file_parser_service._extract_pdf_deep(path, "doc.pdf")
-    mock_ocr.assert_called_once_with(path, 1)
+    _assert_ocr_called_with_page(mock_ocr, path, 1)
     assert "OCR extracted content" in text
 
 
