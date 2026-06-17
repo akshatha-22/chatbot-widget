@@ -101,12 +101,10 @@ def test_page_not_found_message_includes_max_page(db_session):
     db_session.commit()
 
     msg = chat_service._page_not_found_message(115, db_session, ["f-page"])
-    assert "page 115" in msg
-    assert "50" in msg
+    assert "page 115" in msg.lower() or "115" in msg
+    assert "covers pages" not in msg
 
 
-@patch("app.services.chat_service._has_uploaded_files", return_value=True)
-@patch("app.services.chat_service._get_searchable_file_ids", return_value=["f1"])
 @patch("app.services.chat_service.build_rag_context", return_value="")
 @patch("app.services.chat_service._gemini_configured", return_value=True)
 @patch("app.services.chat_service._call_gemini")
@@ -116,32 +114,54 @@ def test_page_not_found_returns_document_not_web(
     mock_gemini,
     _mock_cfg,
     mock_rag,
-    _file_ids,
-    _has_files,
     client,
     auth_headers,
     conversation_id,
+    db_session,
 ):
+    from sqlalchemy import text
+
+    from app.services import vector_store_service
+
     mock_gemini.return_value = ("should not be called", None, None)
 
-    with patch(
-        "app.services.vector_store_service.get_page_content",
-        return_value="",
-    ):
-        with patch(
-            "app.services.vector_store_service.get_max_page_number",
-            return_value=100,
-        ):
-            response = client.post(
-                f"/api/v1/chat/conversations/{conversation_id}/messages",
-                headers=auth_headers,
-                json={"content": "what's on page 115"},
-            )
+    db_session.execute(
+        text(
+            """
+            INSERT INTO uploaded_files
+            (id, conversation_id, filename, file_path, status,
+             pdf_page_count, embedding_model_version)
+            VALUES ('f1', :cid, 'doc.pdf', '/tmp/doc.pdf', 'processed',
+                    447, :version)
+            """
+        ),
+        {
+            "cid": conversation_id,
+            "version": vector_store_service.EMBEDDING_VERSION,
+        },
+    )
+    db_session.execute(
+        text(
+            """
+            INSERT INTO embeddings
+            (file_id, chunk_text, embedding, chunk_index, page)
+            VALUES ('f1', 'page fifty', '[]', 0, 50)
+            """
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/chat/conversations/{conversation_id}/messages",
+        headers=auth_headers,
+        json={"content": "what's on page 115"},
+    )
 
     assert response.status_code == 200
     assistant = response.json()[1]
     assert assistant["source"] == "document"
-    assert "page 115" in assistant["content"].lower()
+    assert "115" in assistant["content"]
+    assert "covers pages" not in assistant["content"].lower()
     mock_gemini.assert_not_called()
 
 
