@@ -93,15 +93,15 @@ def _extract_batch_embeddings(response) -> List[List[float]]:
 
 def _get_embeddings_batch(
     chunks: List[str], batch_size: int = EMBED_BATCH_SIZE
-) -> List[List[float]]:
+) -> tuple[List[List[float]], Optional[str]]:
     """
     Embed many chunks via Gemini batch API (fewer round-trips than one-by-one).
-    Returns one vector per input chunk; failed slots are empty lists.
+    Returns (one vector per input chunk; failed slots are empty lists, last error text).
     """
     if not chunks:
-        return []
+        return [], None
     if not _ensure_genai_configured():
-        return [[] for _ in chunks]
+        return [[] for _ in chunks], "GEMINI_API_KEY is not configured"
 
     results: List[List[float]] = []
     client = _genai_client()
@@ -131,7 +131,8 @@ def _get_embeddings_batch(
             logger.error("All embedding models failed for batch starting at %s", start)
         results.extend(batch_vectors[: len(batch)])
 
-    return results
+    error_text = str(last_error) if last_error else None
+    return results, error_text
 
 
 def _get_embedding(text_input: str) -> List[float]:
@@ -522,7 +523,9 @@ def chunk_and_store(
             {"fid": file_id},
         )
 
-        embeddings = _get_embeddings_batch([chunk["text"] for chunk in resolved_chunks])
+        embeddings, embed_error = _get_embeddings_batch(
+            [chunk["text"] for chunk in resolved_chunks]
+        )
         pg_insert = text(
             """
             INSERT INTO embeddings
@@ -583,9 +586,13 @@ def chunk_and_store(
         db.commit()
         logger.info("Stored %s chunks for file %s", stored, file_id)
         if stored == 0:
+            api_detail = embed_error or "no exception recorded (empty API response)"
             raise ValueError(
-                "Embedding API returned no vectors. On Railway, set GEMINI_API_KEY and "
-                f"EMBEDDING_MODEL=gemini-embedding-001 (current: {settings.EMBEDDING_MODEL})."
+                "Embedding API returned no vectors. "
+                f"API detail: {api_detail}. "
+                "On Railway, verify GEMINI_API_KEY is set and valid. "
+                f"EMBEDDING_MODEL={settings.EMBEDDING_MODEL} "
+                "(expected gemini-embedding-001 per Google docs)."
             )
         return True
 
