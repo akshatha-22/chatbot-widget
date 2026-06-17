@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from fastapi import HTTPException, status
 from typing import Iterator, List, Optional, Tuple
 from app.database.db import Conversation, Message, UploadedFile
@@ -652,36 +653,173 @@ def _resolve_use_search(
     return use_search
 
 
+def _get_indexed_page_set(db: Session, file_id: str) -> set[int]:
+    """Distinct page numbers with live rows in embeddings for this file."""
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT page FROM embeddings
+                WHERE file_id = :file_id
+                """
+            ),
+            {"file_id": file_id},
+        )
+        return {int(row.page) for row in rows if row.page is not None}
+    except Exception:
+        return set()
+
+
+def _build_page_response_or_fallback(
+    db: Session,
+    file_id: str,
+    requested_page: int,
+    pdf_page_count: int,
+    file_status: str,
+) -> str | None:
+    """
+    Returns an accurate message about page availability.
+    Returns None if the page IS available — caller should proceed with retrieval.
+    Never trusts pdf_page_count alone to claim coverage.
+    """
+    if file_status == "failed":
+        return (
+            "This document failed to process and has "
+            "no indexed content. Please delete it and "
+            "re-upload."
+        )
+
+    if file_status in ("pending", "extracting", "embedding"):
+        return (
+            f"This document is still being processed "
+            f"({file_status}). Please wait a moment "
+            f"and try again."
+        )
+
+    indexed_set = _get_indexed_page_set(db, file_id)
+
+    if not indexed_set:
+        return (
+            "This document shows as processed but has "
+            "no searchable content — likely an indexing "
+            "error. Please delete it and re-upload."
+        )
+
+    if requested_page not in indexed_set:
+        coverage_pct = (
+            round(len(indexed_set) / pdf_page_count * 100)
+            if pdf_page_count
+            else 0
+        )
+        return (
+            f"Page {requested_page} isn't in the indexed "
+            f"content. {len(indexed_set)} of "
+            f"{pdf_page_count} pages ({coverage_pct}%) "
+            f"are actually indexed."
+        )
+
+    return None
+
+
+def _resolve_page_query_fallback(
+    db: Session,
+    conversation_id: int,
+    requested_page: int,
+) -> str | None:
+    """
+    For page-specific queries, return a user-facing message when the page
+    cannot be served, or None when at least one file has the page indexed.
+    """
+    files = (
+        db.query(UploadedFile)
+        .filter(UploadedFile.conversation_id == conversation_id)
+        .all()
+    )
+    if not files:
+        return None
+
+    for uploaded in files:
+        if uploaded.status == "processed" and requested_page in _get_indexed_page_set(
+            db, uploaded.id
+        ):
+            return None
+
+    if len(files) == 1:
+        uploaded = files[0]
+        return _build_page_response_or_fallback(
+            db,
+            uploaded.id,
+            requested_page,
+            uploaded.pdf_page_count or 0,
+            uploaded.status,
+        )
+
+    for uploaded in files:
+        if uploaded.status in ("failed", "pending", "extracting", "embedding"):
+            message = _build_page_response_or_fallback(
+                db,
+                uploaded.id,
+                requested_page,
+                uploaded.pdf_page_count or 0,
+                uploaded.status,
+            )
+            if message is not None:
+                return message
+
+    for uploaded in files:
+        if uploaded.status == "processed":
+            message = _build_page_response_or_fallback(
+                db,
+                uploaded.id,
+                requested_page,
+                uploaded.pdf_page_count or 0,
+                uploaded.status,
+            )
+            if message is not None:
+                return message
+
+    return None
+
+
 def _page_not_found_message(
     page_num: int,
     db: Session,
     file_ids: List[str],
 ) -> str:
-    max_indexed = vector_store_service.get_max_page_number(db, file_ids)
+    """Honest page-miss message based on live embeddings, not pdf_page_count."""
+    indexed_set: set[int] = set()
+    for file_id in file_ids:
+        indexed_set |= _get_indexed_page_set(db, file_id)
+
+    if not indexed_set:
+        from app.database.db import UploadedFile
+
+        rows = (
+            db.query(UploadedFile)
+            .filter(UploadedFile.id.in_(file_ids))
+            .all()
+        )
+        if any(row.status == "failed" for row in rows):
+            return (
+                "This document failed to process and has "
+                "no indexed content. Please delete it and "
+                "re-upload."
+            )
+        return (
+            "This document shows as processed but has "
+            "no searchable content — likely an indexing "
+            "error. Please delete it and re-upload."
+        )
+
     pdf_total = vector_store_service.get_stored_pdf_page_count(db, file_ids)
-
-    if pdf_total and page_num <= pdf_total and page_num > max_indexed:
-        return (
-            f"I couldn't read page {page_num} from your PDF. "
-            f"Your file has {pdf_total} pages and {max_indexed} were indexed with readable text. "
-            f"Page {page_num} may be image-only or failed during processing — try re-uploading the file."
-        )
-
-    if pdf_total and max_indexed > 0:
-        return (
-            f"I couldn't find page {page_num} in your uploaded document. "
-            f"Your PDF has {pdf_total} pages; indexed content covers pages 1–{max_indexed}."
-        )
-
-    if max_indexed > 0:
-        return (
-            f"I couldn't find page {page_num} in your uploaded document. "
-            f"The indexed content covers pages 1–{max_indexed}."
-        )
-
+    coverage_pct = (
+        round(len(indexed_set) / pdf_total * 100) if pdf_total else 0
+    )
     return (
-        f"I couldn't find page {page_num} in your uploaded document. "
-        "Try a different page number."
+        f"Page {page_num} isn't in the indexed "
+        f"content. {len(indexed_set)} of "
+        f"{pdf_total} pages ({coverage_pct}%) "
+        f"are actually indexed."
     )
 
 
@@ -907,8 +1045,14 @@ def _prepare_assistant_context(
     has_documents = _has_uploaded_files(db, conversation_id)
     rag_context = ""
 
+    page_num = vector_store_service.detect_page_query(user_message)
+    if page_num is not None:
+        page_fallback = _resolve_page_query_fallback(db, conversation_id, page_num)
+        if page_fallback is not None:
+            print(f"[RAG] Page {page_num} blocked: {page_fallback[:80]}")
+            return conv, "", "", history, None, "document", False, page_fallback
+
     if has_documents:
-        page_num = vector_store_service.detect_page_query(user_message)
         if page_num is not None and file_ids:
             page_context = vector_store_service.get_page_content(db, file_ids, page_num)
             if page_context:
