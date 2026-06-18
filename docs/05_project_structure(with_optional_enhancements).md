@@ -286,3 +286,4 @@ npm run type-check
 
 - [README.md](../README.md) — quick start  
 - [07_deployment_guide.md](./07_deployment_guide.md) — production  
+- [08_frontend_guide.md](./08_frontend_guide.md) — React/TypeScript frontend reference  

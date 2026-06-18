@@ -364,6 +364,7 @@ chatbot-widget/
 | [05_project_structure(with_optional_enhancements).md](docs/05_project_structure(with_optional_enhancements).md) | Directory layout |
 | [06_Epics_User_stories_and_Use_cases.md](docs/06_Epics_User_stories_and_Use_cases.md) | Has Epics, User stories and Use-cases |
 | [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
+| [08_frontend_guide.md](docs/08_frontend_guide.md) | React, TypeScript, components, hooks, API client, streaming |
 
 ---
 

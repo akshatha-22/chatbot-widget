@@ -209,4 +209,5 @@ Use this when demoing or writing tests:
 ## Related docs
 
 - [04_ml_ai_concepts.md](./04_ml_ai_concepts.md) — how RAG/LLM concepts apply here  
-- [07_deployment_guide.md](./07_deployment_guide.md) — production setup  
+- [07_deployment_guide.md](./07_deployment_guide.md) — production setup
+- [08_frontend_guide.md](./08_frontend_guide.md) — React, TypeScript, widget components & functions  

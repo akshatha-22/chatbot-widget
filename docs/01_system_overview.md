@@ -260,4 +260,5 @@ Use `DATABASE_URL=sqlite:///./chatbot.db` for local dev without PostgreSQL.
 | [04_ml_ai_concepts.md](./04_ml_ai_concepts.md) | RAG/LLM concepts mapped to this repo |
 | [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md) | Directory tree |
 | [07_deployment_guide.md](./07_deployment_guide.md) | Deploy and env vars |
+| [08_frontend_guide.md](./08_frontend_guide.md) | React, TypeScript, widget components & API client |
 | [../README.md](../README.md) | Quick start and API reference |
