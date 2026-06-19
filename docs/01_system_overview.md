@@ -22,6 +22,7 @@ Remi is a **self-contained React widget** plus a **FastAPI API** that provides:
 - **Visual identity** — dark launcher sphere with soft blue radial halo (`RemiFace.tsx`); file delete UX on desktop and mobile with optimistic UI + toast
 - **Production deployment** — frontend on Vercel, API on Railway, `VITE_API_URL` + `CORS_ORIGINS` + `ENVIRONMENT=production` aligned
 - **Script-tag embed** — `remi-widget@1.0.0` on npm + jsDelivr; `build:lib` IIFE bundle for any host site ([10_embedding_guide.md](./10_embedding_guide.md))
+- **Automated tests** — **212 total** (203 backend pytest + 9 frontend Vitest embed tests); see [ARCHITECTURE.md](./ARCHITECTURE.md) §15
 
 There is **no** LangChain, Redis, Celery, WebSocket server, or moderation pipeline in the running application.
 

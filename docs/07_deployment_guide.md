@@ -199,8 +199,8 @@ On startup:
 
 ### CI (`.github/workflows/ci.yml`)
 
-- Backend: `pytest tests/` (191 tests)
-- Frontend: `npm run type-check`, `npm run build`
+- Backend: `pytest tests/` (**203 tests**)
+- Frontend: `npm run type-check`, `npm run build`, `npm run build:lib`, `npm run test` (**9 tests**)
 
 ### Deploy (`.github/workflows/deploy.yml`)
 

@@ -21,7 +21,9 @@ Code-level reference for the **Remi** chat widget in `client/`. This document ex
 11. [Utilities & local storage](#11-utilities--local-storage)
 12. [Styling & UI primitives](#12-styling--ui-primitives)
 13. [Important functions (quick index)](#13-important-functions-quick-index)
-14. [Not yet built](#14-not-yet-built)
+14. [Embed / script-tag modules](#14-embed--script-tag-modules)
+15. [Tests (frontend)](#15-tests-frontend)
+16. [Not yet built](#16-not-yet-built)
 
 ---
 
@@ -48,18 +50,22 @@ The widget is **self-contained**: auth, chat, uploads, and exports all run insid
 
 ## 2. Entry points & build
 
+Remi has **two Vite entry points** — the dev app and the script-tag embed bundle:
+
 ```
-main.tsx
-  └── ErrorBoundary (class component)
-        └── App.tsx
-              └── FloatingWidget.tsx  →  re-exports ChatbotWidget from index.tsx
+main.tsx                          embed.tsx (build:lib only)
+  └── ErrorBoundary                     └── createRemiEmbedController
+        └── App.tsx                           └── ChatbotWidgetRoot (default export)
+              └── FloatingWidget.tsx                └── window.RemiWidget
+                    └── ChatbotWidgetRoot
 ```
 
 | File | Purpose |
 |------|---------|
-| `client/src/main.tsx` | `ReactDOM.createRoot`, StrictMode, global CSS import |
-| `client/src/App.tsx` | Minimal host page; mounts widget only |
-| `client/vite.config.ts` | React plugin, path aliases (`@`, `@components`, `@hooks`), reads `VITE_API_URL` from repo-root `.env*` |
+| `client/src/main.tsx` | Dev app: `initApiFromEnv()`, StrictMode, `index.css` |
+| `client/src/embed.tsx` | IIFE entry for npm/jsDelivr; auto-mounts from `window.RemiConfig` |
+| `client/src/App.tsx` | Minimal host page; mounts `FloatingWidget` only |
+| `client/vite.config.ts` | **App mode** (`dist/`) or **lib mode** (`dist-lib/remi-widget.js`) — see [§14](#14-embed--script-tag-modules) |
 | `client/src/vite-env.d.ts` | Vite client types |
 
 **Scripts** (`client/package.json`):
@@ -249,6 +255,18 @@ Each major component exports a `*Props` interface (e.g. `ChatInterfaceProps`, `C
 ---
 
 ## 7. API layer
+
+### `api/config.ts`
+
+Runtime API origin — shared by the dev app and script-tag embeds. Replaces relying on `import.meta.env` alone after mount.
+
+| Function | Purpose |
+|----------|---------|
+| `getApiBaseUrl()` | Current origin without trailing slash (default `http://localhost:8000`) |
+| `setApiBaseUrl(url)` | Called by `ChatbotWidget` / embed `mount()` before any API call |
+| `initApiFromEnv()` | Dev app only — reads `VITE_API_URL` in `main.tsx` |
+
+`api/client.ts` and `api/chat.ts` read `getApiBaseUrl()` on each request so embed hosts can set `apiUrl` at runtime. See [§14 Embed / script-tag modules](#14-embed--script-tag-modules).
 
 ### `api/client.ts`
 
@@ -532,7 +550,153 @@ Use this when navigating the codebase or onboarding.
 
 ---
 
-## 14. Not yet built
+## 14. Embed / script-tag modules
+
+How Remi ships as a **single-file IIFE** (`remi-widget.js`) for third-party sites. Integrator-facing usage (CDN snippets, WordPress, CORS) is in [10_embedding_guide.md](./10_embedding_guide.md); this section documents the **React/TypeScript implementation**.
+
+### Module map
+
+| Path | Role |
+|------|------|
+| `src/embed.tsx` | Lib entry: wires controller, `window.RemiWidget`, auto-mount |
+| `src/embed/mount.ts` | `createRemiEmbedController`, DOM shell, `RemiEmbedConfig` types |
+| `src/api/config.ts` | Runtime `apiUrl` (`setApiBaseUrl` / `getApiBaseUrl`) |
+| `src/components/ChatbotWidget/index.tsx` | `ChatbotWidgetProps`, `.remi-widget-root` wrapper |
+| `src/components/ChatbotWidget/WidgetThemeContext.tsx` | `primaryColor` + `position` via React context |
+| `src/utils/widgetPosition.ts` | `bottom-left` / `bottom-right` Tailwind anchor classes |
+| `src/styles/embed.css` | Tailwind layers for embed build (scoped) |
+| `tailwind.config.embed.js` | `important: '.remi-widget-root'` — isolates utilities from host CSS |
+| `postcss.config.embed.js` | PostCSS pipeline for lib mode only |
+| `vite.config.ts` | `mode === 'lib'` → IIFE + CSS-in-JS → `dist-lib/` |
+| `tests/unit/embed.test.ts` | Vitest for mount controller (9 tests) |
+| `embed-demo.html` | Local preview after `build:lib` + `vite preview` |
+
+### Load flow (host page)
+
+```mermaid
+sequenceDiagram
+    participant H as Host page
+    participant S as remi-widget.js
+    participant M as mount.ts
+    participant C as api/config
+    participant W as ChatbotWidgetRoot
+
+    H->>H: window.RemiConfig = { apiUrl, ... }
+    H->>S: script src (jsDelivr or self-hosted)
+    S->>M: scheduleAutoMount → mount(RemiConfig)
+    M->>C: setApiBaseUrl(apiUrl)
+    M->>M: create fixed overlay div on document.body
+    M->>W: createRoot + render(StrictMode)
+    W->>W: .remi-widget-root + WidgetThemeProvider
+```
+
+### `embed.tsx`
+
+- Imports `embed.css` (Tailwind for embed build).
+- Calls `createRemiEmbedController` with a render callback that mounts `ChatbotWidgetRoot` (default export from `index.tsx`).
+- Assigns `window.RemiWidget` to the controller.
+- On load: if the executing `<script>` does **not** have `data-manual-mount="true"`, calls `controller.mount(window.RemiConfig ?? {})`.
+
+### `embed/mount.ts`
+
+**`RemiEmbedConfig`**
+
+| Field | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `apiUrl` | **Yes** | — | Backend origin; logs error and skips mount if missing |
+| `primaryColor` | No | `#2979FF` | Sets `--remi-accent` on `.remi-widget-root` |
+| `position` | No | `bottom-right` | `bottom-right` \| `bottom-left` |
+| `containerId` | No | `remi-widget-mount` | Outer overlay element `id` |
+
+**`RemiEmbedController`**
+
+| Method | Behavior |
+|--------|----------|
+| `mount(config?)` | Creates full-viewport fixed overlay (`z-index: 999999`, `pointer-events: none`) with an inner interactive layer; renders widget once |
+| `unmount()` | `root.unmount()` + removes overlay from `document.body` |
+| `isMounted()` | Whether overlay exists |
+
+**Helpers (exported for tests):** `shouldAutoMount(scriptTag)`, `scheduleAutoMount(fn)` — waits for `DOMContentLoaded` when needed.
+
+### `ChatbotWidget` embed props
+
+`ChatbotWidgetRoot` (default export) wraps the stateful `ChatbotWidget`:
+
+```tsx
+export type ChatbotWidgetProps = {
+  apiUrl?: string      // required for embed; optional when initApiFromEnv() ran
+  primaryColor?: string
+  position?: WidgetPosition
+}
+```
+
+- Outer div: `className="remi-widget-root"` + `style={{ '--remi-accent': primaryColor }}`.
+- `useEffect` in `ChatbotWidget` calls `setApiBaseUrl(apiUrl)` when the prop is set.
+- Same component tree as the Vercel dev app — auth, chat, files, and streaming are unchanged.
+
+### `WidgetThemeContext.tsx`
+
+Provides `primaryColor` and `position` to launcher and panels via `useWidgetTheme()`. Used by `RemiLauncher`, `CompactWidget`, and loading placeholders so embed hosts can theme without prop-drilling through every child.
+
+### `widgetPosition.ts`
+
+| Export | Purpose |
+|--------|---------|
+| `WidgetPosition` | `'bottom-right' \| 'bottom-left'` |
+| `desktopPanelClasses(position)` | Compact/auth panel anchor on desktop |
+| `launcherAnchorClasses(position)` | Floating launcher button corner |
+
+### Styles & CSS isolation
+
+- **Lib build** uses `embed.css` + `tailwind.config.embed.js` with `important: '.remi-widget-root'` so Tailwind utilities win inside the widget without leaking global resets to the host page.
+- **App build** uses `index.css` and the default Tailwind config (no `important` scope).
+- Host page styles can still affect unscoped elements; full Shadow DOM is **not** implemented (see [ARCHITECTURE.md](./ARCHITECTURE.md) §16).
+
+### Vite lib mode (`npm run build:lib`)
+
+When `vite build --mode lib`:
+
+| Setting | Value |
+|---------|--------|
+| Entry | `src/embed.tsx` |
+| Output | `dist-lib/remi-widget.js` (IIFE, global `RemiWidget`) |
+| CSS | Injected by `vite-plugin-css-injected-by-js` (single JS file) |
+| `publicDir` | `false` (avoids shipping `vite.svg` in npm tarball) |
+| PostCSS | `postcss.config.embed.js` → scoped Tailwind |
+
+App mode (`npm run build`) is unchanged: `dist/` for Vercel, `VITE_API_URL` baked via `define`.
+
+### Dev vs embed API URL
+
+| Context | How `apiUrl` is set |
+|---------|---------------------|
+| **Vercel dev app** | `initApiFromEnv()` in `main.tsx` ← `VITE_API_URL` at build time |
+| **Script-tag embed** | `window.RemiConfig.apiUrl` or `RemiWidget.mount({ apiUrl })` → `setApiBaseUrl` |
+| **React host importing widget** | Pass `apiUrl` prop to `ChatbotWidget` / `FloatingWidget` |
+
+### Related docs
+
+- [10_embedding_guide.md](./10_embedding_guide.md) — CDN URLs, `RemiConfig`, publish checklist, CORS
+- [§15 Tests (frontend)](#15-tests-frontend) — `embed.test.ts`
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — full-stack reference + test inventory
+
+---
+
+## 15. Tests (frontend)
+
+| Item | Details |
+|------|---------|
+| **Runner** | Vitest (`client/package.json` → `npm run test`) |
+| **Suite** | `client/tests/unit/embed.test.ts` — **9 tests** |
+| **Coverage** | `createRemiEmbedController` mount/unmount, `window.RemiConfig`, auto-mount from script tag, `data-manual-mount` |
+| **CI** | `.github/workflows/ci.yml` runs `cd client && npm run test` after `build:lib` |
+| **Gaps** | No tests yet for chat UI, file delete, stream abort on close, or rate-limit banner |
+
+**212 tests total** in the monorepo (203 backend pytest + 9 frontend). See [ARCHITECTURE.md](./ARCHITECTURE.md) §15 and `backend/tests/README.md`.
+
+---
+
+## 16. Not yet built
 
 | Item | Notes |
 |------|-------|
@@ -579,4 +743,4 @@ sequenceDiagram
 | [02_architecture_diagrams.md](./02_architecture_diagrams.md) | Full-stack Mermaid diagrams |
 | [07_deployment_guide.md](./07_deployment_guide.md) | `VITE_API_URL`, Vercel build |
 | [10_embedding_guide.md](./10_embedding_guide.md) | Script-tag embed (`remi-widget` on npm + jsDelivr) |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Backend chat_service, RAG, SSE server side |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Backend chat_service, RAG, SSE server side; embed paths in quick file index |

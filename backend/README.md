@@ -49,7 +49,7 @@ Environment variables are read from `.env.local` at the **repo root** (see root 
 python -m pytest tests/ -v
 ```
 
-See [tests/README.md](tests/README.md) — **191 tests**, pgvector mocked on SQLite.
+See [tests/README.md](tests/README.md) — **203 backend tests** (+ **9 frontend** Vitest embed tests = **212 total**), pgvector mocked on SQLite.
 
 ## Docs
 

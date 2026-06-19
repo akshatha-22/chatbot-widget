@@ -285,11 +285,12 @@ Model fallbacks: configured `GEMINI_MODEL`, then `gemini-2.5-flash`, `gemini-2.5
 chatbot-widget/
 ├── .env.example / .env.local       # Shared env (repo root; Vite envDir + backend config)
 ├── .github/workflows/
-│   ├── ci.yml                       # pytest + type-check + build
+│   ├── ci.yml                       # pytest (203) + type-check + build + build:lib + vitest (9)
 │   └── deploy.yml                   # Vercel production (backend on Railway)
 ├── client/                          # React widget (Vite)
 │   ├── index.html
 │   ├── vite.config.ts
+│   ├── tests/unit/embed.test.ts     # Vitest (9 tests)
 │   └── src/
 │       ├── main.tsx                 # Entry
 │       ├── App.tsx                  # Imports default export from FloatingWidget.tsx
@@ -323,7 +324,7 @@ chatbot-widget/
 │   │   │   ├── rag_quality_service.py   # RAG context quality tiers
 │   │   │   └── vector_store_service.py  # Gemini embed + pgvector search + page retrieval
 │   │   └── schemas/                 # Pydantic models + audit_log.py ORM
-│   ├── tests/                       # test_api_*.py + tests/unit/ (191 tests)
+│   ├── tests/                       # test_api_*.py + tests/unit/ (203 tests)
 │   ├── requirements.txt
 │   └── pytest.ini
 ├── package.json                     # npm workspace root
@@ -349,6 +350,10 @@ chatbot-widget/
 | `WidgetConversationDashboard.tsx` | Browse and search conversations |
 | `MobileTabBar.tsx` / `MobileConversationList.tsx` / `MobileFilesPanel.tsx` | Mobile expanded layout |
 | `streamSend.ts` | Shared SSE streaming helper for compact & expanded widgets |
+| `embed.tsx` / `embed/mount.ts` | Script-tag IIFE entry; `window.RemiWidget` mount API — [08_frontend_guide.md](docs/08_frontend_guide.md) §14 |
+| `api/config.ts` | Runtime `apiUrl` for embeds (`setApiBaseUrl` / `getApiBaseUrl`) |
+| `WidgetThemeContext.tsx` | Embed theming (`primaryColor`, `position`) |
+| `widgetPosition.ts` | Launcher/panel corner classes (`bottom-left` / `bottom-right`) |
 
 ---
 
@@ -365,7 +370,7 @@ chatbot-widget/
 | [05_project_structure(with_optional_enhancements).md](docs/05_project_structure(with_optional_enhancements).md) | Directory layout |
 | [06_Epics_User_stories_and_Use_cases.md](docs/06_Epics_User_stories_and_Use_cases.md) | Has Epics, User stories and Use-cases |
 | [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
-| [08_frontend_guide.md](docs/08_frontend_guide.md) | React, TypeScript, components, hooks, API client, streaming |
+| [08_frontend_guide.md](docs/08_frontend_guide.md) | React, TypeScript, components, hooks, API client, streaming, **embed modules (§14)** |
 | [09_known_limitations.md](docs/09_known_limitations.md) | Known limitations (quota vs architecture) & future work |
 | [10_embedding_guide.md](docs/10_embedding_guide.md) | Script-tag embed on any website (`remi-widget` on npm + jsDelivr) |
 
@@ -492,7 +497,11 @@ venv\Scripts\python.exe -m pytest tests/ -v
 python -m pytest tests/ -v
 ```
 
-**191 tests** in `backend/tests/` (API integration + `tests/unit/` for sanitizer, cache, MIME magic, auth rate limit, audit, RAG routing, page extraction, embedding versioning, file delete). No live LLM calls — `conftest.py` clears API keys and mocks pgvector indexing on uploads by default.
+**203 tests** in `backend/tests/` (API integration + `tests/unit/` for sanitizer, cache, MIME magic, auth rate limit, audit, RAG routing, page extraction, embedding versioning, Gemini quota, page-coverage honesty, file delete). No live LLM calls — `conftest.py` clears API keys and mocks pgvector indexing on uploads by default.
+
+**9 tests** in `client/tests/unit/embed.test.ts` (Vitest — embed mount/unmount controller).
+
+**212 tests total** across the monorepo.
 
 See `backend/tests/README.md` for fixture details.
 
@@ -503,14 +512,15 @@ From repo root:
 ```bash
 npm run type-check
 npm run build
+cd client && npm run build:lib && npm run test
 ```
 
 ### CI pipeline (`.github/workflows/ci.yml`)
 
 | Job | What it runs |
 | --- | --- |
-| **Backend (pytest)** | Python 3.12 · `pip install -r requirements.txt` · `pytest tests/` |
-| **Frontend (type-check & build)** | Node 22 · `npm ci` · `npm run type-check` · `npm run build` · `build:lib` · `npm run test` |
+| **Backend (pytest)** | Python 3.12 · `pip install -r requirements-ci.txt` · `pytest tests/` (**203 tests**) |
+| **Frontend (type-check & build)** | Node 22 · `npm ci` · `npm run type-check` · `npm run build` · `build:lib` · `npm run test` (**9 tests**) |
 
 Triggers on push/PR to `main` and `develop`.
 
@@ -579,7 +589,8 @@ The widget ships as an npm package and loads via a single script tag — no Reac
 ```
 
 - **Package:** [`remi-widget`](https://www.npmjs.com/package/remi-widget) · **Local test:** [test-embed.html](test-embed.html)
-- **Full guide:** [docs/10_embedding_guide.md](docs/10_embedding_guide.md)
+- **Integrator guide:** [docs/10_embedding_guide.md](docs/10_embedding_guide.md)
+- **Developer reference (embed modules):** [docs/08_frontend_guide.md §14](docs/08_frontend_guide.md#14-embed--script-tag-modules)
 
 ---
 
@@ -623,4 +634,4 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 **Last updated:** June 2026  
-**Status:** Production-deployed widget — pgvector RAG with document-first routing, full PDF extraction (PyMuPDF + Gemini OCR), page-aware retrieval, processing progress UI, security hardening, embeddable `remi-widget` package on npm + jsDelivr, 191 backend + 9 frontend tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs.
+**Status:** Production-deployed widget — pgvector RAG with document-first routing, full PDF extraction (PyMuPDF + Gemini OCR), page-aware retrieval, processing progress UI, security hardening, embeddable `remi-widget` package on npm + jsDelivr, **212 tests** passing (203 backend + 9 frontend), live on Vercel + Railway. Remaining: Conversation Detail tabs.

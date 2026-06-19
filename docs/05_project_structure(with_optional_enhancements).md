@@ -156,12 +156,12 @@ backend/
 │       ├── response_cache.py     # per-user TTLCache
 │       ├── vector_store_service.py  # Gemini embed + pgvector + page retrieval
 │       └── file_parser_service.py
-├── tests/                  # 105 pytest tests
+├── tests/                  # 203 pytest tests
 │   ├── test_api_*.py
 │   ├── test_security_features.py
 │   ├── test_network.py
 │   ├── conftest.py
-│   └── unit/               # sanitizer, cache, MIME, quota, audit, file delete, …
+│   └── unit/               # sanitizer, cache, MIME, quota, RAG, embeddings, …
 ├── data/                   # Runtime (gitignored): uploads + vector_store
 ├── Dockerfile              # Railway/production image
 ├── railway.toml
@@ -206,7 +206,7 @@ backend/
 
 | Workflow | Trigger | Actions |
 |----------|---------|---------|
-| `ci.yml` | Push/PR `main`, `develop` | Backend pytest; frontend type-check + build + `build:lib` + vitest |
+| `ci.yml` | Push/PR `main`, `develop` | Backend pytest (203); frontend type-check + build + `build:lib` + vitest (9) |
 | `deploy.yml` | After CI on `main` or manual | Vercel production (backend deploys on Railway separately) |
 
 ---

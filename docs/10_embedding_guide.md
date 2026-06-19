@@ -213,6 +213,7 @@ Embed styles are scoped under `.remi-widget-root` with Tailwind `important: '.re
 
 ## Related
 
+- [08_frontend_guide.md](./08_frontend_guide.md) §14 — embed implementation (`embed.tsx`, `mount.ts`, `api/config.ts`, lib build)
 - [09_known_limitations.md](./09_known_limitations.md) — deployment constraints
 - [07_deployment_guide.md](./07_deployment_guide.md) — Railway + Vercel setup
 - [08_frontend_guide.md](./08_frontend_guide.md) — React component reference
