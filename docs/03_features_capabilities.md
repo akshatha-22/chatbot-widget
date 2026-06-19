@@ -117,7 +117,7 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 
 | Feature | Implementation |
 |---------|----------------|
-| Embed model | Import widget in host React app (`App.tsx` renders `FloatingWidget`) |
+| Embed model | Import widget in host React app (`App.tsx`) **or** script tag via `build:lib` → `remi-widget.js` ([10_embedding_guide.md](./10_embedding_guide.md)) |
 | API base URL | `VITE_API_URL` baked at build time (`vite.config.ts`) |
 | CORS | Configurable origins + Vercel preview regex |
 
@@ -168,7 +168,7 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Item | Notes |
 |------|-------|
 | Conversation Detail tabs | Messages / Files / Generated Files / Details — `getConversationDetail()` in `chat.ts` unused |
-| Embeddable npm package | `build:lib` Vite library mode for script-tag / drop-in embedding |
+| Embeddable npm package | `remi-widget` on npm + jsDelivr CDN — run `npm publish` from `client/` to go live |
 
 ---
 
@@ -210,4 +210,5 @@ Use this when demoing or writing tests:
 
 - [04_ml_ai_concepts.md](./04_ml_ai_concepts.md) — how RAG/LLM concepts apply here  
 - [07_deployment_guide.md](./07_deployment_guide.md) — production setup
-- [08_frontend_guide.md](./08_frontend_guide.md) — React, TypeScript, widget components & functions  
+- [08_frontend_guide.md](./08_frontend_guide.md) — React, TypeScript, widget components & functions
+- [09_known_limitations.md](./09_known_limitations.md) — known limitations & future work

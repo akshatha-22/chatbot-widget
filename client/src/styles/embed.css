@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+@import './variables.css';
+@import './themes.css';
+@import './animations.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Scoped reset — host page styles must not leak into the widget */
+.remi-widget-root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', 'Helvetica Neue', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+}
+
+.remi-widget-root *,
+.remi-widget-root *::before,
+.remi-widget-root *::after {
+  box-sizing: border-box;
+}
+
+.remi-widget-root .bubble-enter {
+  animation: bubbleIn 200ms ease forwards;
+}
+
+.remi-widget-root code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+.remi-widget-root ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.remi-widget-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.remi-widget-root ::-webkit-scrollbar-thumb {
+  background: #e2e2e2;
+  border-radius: 4px;
+}
+
+.remi-widget-root ::-webkit-scrollbar-thumb:hover {
+  background: #cfcfcf;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .remi-widget-root * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.remi-widget-root .remi-source-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.remi-widget-root .remi-external-links {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.remi-widget-root .remi-links-header {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.remi-widget-root .remi-links-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.remi-widget-root .remi-link-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--remi-accent, #2979ff);
+  text-decoration: none;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.remi-widget-root .remi-link-item:hover {
+  text-decoration: underline;
+}

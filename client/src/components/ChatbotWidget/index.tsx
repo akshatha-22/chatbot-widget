@@ -3,6 +3,8 @@ import CompactWidget from './CompactWidget'
 import ExpandedWidget from './ExpandedWidget'
 import RemiLauncher from './RemiLauncher'
 import WidgetAuthPanel from './WidgetAuthPanel'
+import { WidgetThemeProvider } from './WidgetThemeContext'
+import { setApiBaseUrl } from '../../api/config'
 import {
   createConversation,
   deleteConversation,
@@ -24,8 +26,37 @@ import {
 } from '../../utils/conversationFoldersStorage'
 import type { Conversation, Message, UploadedFile, User } from '../../types'
 import { FILE_IN_PROGRESS_STATUSES } from '../../types'
+import type { WidgetPosition } from '../../utils/widgetPosition'
+import { desktopPanelClasses } from '../../utils/widgetPosition'
 
-const ChatbotWidget = () => {
+export type ChatbotWidgetProps = {
+  /** Backend origin, e.g. https://api.example.com — required for script-tag embeds. */
+  apiUrl?: string
+  primaryColor?: string
+  position?: WidgetPosition
+}
+
+function LoadingPanel({
+  message,
+  position,
+}: {
+  message: string
+  position: WidgetPosition
+}) {
+  return (
+    <div
+      className={`fixed w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] p-6 z-50 text-sm text-[#8C8C8C] animate-widgetIn ${desktopPanelClasses(position)}`}
+    >
+      {message}
+    </div>
+  )
+}
+
+export function ChatbotWidget({
+  apiUrl,
+  primaryColor = '#2979FF',
+  position = 'bottom-right',
+}: ChatbotWidgetProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const [user, setUser] = useState<User | null>(null)
@@ -43,6 +74,19 @@ const ChatbotWidget = () => {
   const [hasUnread, setHasUnread] = useState(false)
   const seenAssistantCount = useRef(0)
   const streamControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (apiUrl) {
+      setApiBaseUrl(apiUrl)
+    }
+  }, [apiUrl])
+
+  useEffect(() => {
+    const root = document.querySelector('.remi-widget-root') as HTMLElement | null
+    if (root) {
+      root.style.setProperty('--remi-accent', primaryColor)
+    }
+  }, [primaryColor])
 
   const abortActiveStream = useCallback(() => {
     if (streamControllerRef.current) {
@@ -311,11 +355,7 @@ const ChatbotWidget = () => {
 
   // Widget open but auth still resolving / not signed in → show auth panel.
   if (!authChecked) {
-    return (
-      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] p-6 z-50 text-sm text-[#8C8C8C] animate-widgetIn origin-bottom-right">
-        Loading…
-      </div>
-    )
+    return <LoadingPanel message="Loading…" position={position} />
   }
 
   if (!user) {
@@ -323,11 +363,7 @@ const ChatbotWidget = () => {
   }
 
   if (!chatReady) {
-    return (
-      <div className="fixed bottom-[100px] right-[20px] w-[350px] rounded-2xl border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] p-6 z-50 text-sm text-[#8C8C8C] animate-widgetIn origin-bottom-right">
-        Loading chat…
-      </div>
-    )
+    return <LoadingPanel message="Loading chat…" position={position} />
   }
 
   if (isExpanded) {
@@ -352,4 +388,18 @@ const ChatbotWidget = () => {
   )
 }
 
-export default ChatbotWidget
+function ChatbotWidgetRoot(props: ChatbotWidgetProps) {
+  const { primaryColor = '#2979FF', position = 'bottom-right' } = props
+  return (
+    <div
+      className="remi-widget-root text-[#1A1A1A] antialiased"
+      style={{ ['--remi-accent' as string]: primaryColor }}
+    >
+      <WidgetThemeProvider primaryColor={primaryColor} position={position}>
+        <ChatbotWidget {...props} />
+      </WidgetThemeProvider>
+    </div>
+  )
+}
+
+export default ChatbotWidgetRoot

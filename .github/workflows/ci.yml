@@ -78,3 +78,11 @@ jobs:
         env:
           VITE_API_URL: http://localhost:8000
         run: npm run build
+
+      - name: Build embed library
+        env:
+          VITE_API_URL: http://localhost:8000
+        run: cd client && npm run build:lib
+
+      - name: Frontend unit tests
+        run: cd client && npm run test

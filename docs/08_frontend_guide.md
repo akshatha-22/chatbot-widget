@@ -67,6 +67,7 @@ main.tsx
 ```bash
 npm run dev          # Vite on http://127.0.0.1:5173
 npm run build        # Production bundle → client/dist
+npm run build:lib    # Embeddable IIFE → client/dist-lib/remi-widget.js
 npm run type-check   # tsc --noEmit
 ```
 
@@ -528,7 +529,7 @@ Use this when navigating the codebase or onboarding.
 
 | Item | Notes |
 |------|-------|
-| **Embeddable npm package** | No `build:lib` / script-tag bundle |
+| **npm registry publish** | Configured as `remi-widget`; run `npm publish` from `client/` — see [10_embedding_guide.md](../docs/10_embedding_guide.md) |
 | **Conversation Detail tabs** | `getConversationDetail()` unused |
 | **Mic / voice input** | Buttons present but disabled |
 | **Regenerate response** | No UI |

@@ -78,17 +78,27 @@ async def limit_request_body_size(request: Request, call_next):
 
 
 # Configure CORS Middleware
-_cors_regex = settings.BACKEND_CORS_ORIGIN_REGEX
-if settings.BACKEND_CORS_ORIGINS or _cors_regex:
-    _cors_kwargs: dict = {
-        "allow_origins": [str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-        "allow_credentials": True,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"],
-    }
-    if _cors_regex:
-        _cors_kwargs["allow_origin_regex"] = _cors_regex
-    app.add_middleware(CORSMiddleware, **_cors_kwargs)
+if settings.CORS_ALLOW_ANY_ORIGIN:
+    # Embeddable widget: JWT in Authorization header — safe without credentials.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    _cors_regex = settings.BACKEND_CORS_ORIGIN_REGEX
+    if settings.BACKEND_CORS_ORIGINS or _cors_regex:
+        _cors_kwargs: dict = {
+            "allow_origins": [str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+            "allow_credentials": True,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+        if _cors_regex:
+            _cors_kwargs["allow_origin_regex"] = _cors_regex
+        app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 app.add_middleware(SecurityHeadersMiddleware)
 

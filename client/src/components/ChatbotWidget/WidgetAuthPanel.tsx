@@ -4,6 +4,8 @@ import { X } from 'lucide-react'
 import { login as apiLogin, signup as apiSignup, getMe } from '../../api/auth'
 import type { User } from '../../types'
 import RemiAvatar2D from './RemiAvatar2D'
+import { useWidgetTheme } from './WidgetThemeContext'
+import { desktopPanelClasses } from '../../utils/widgetPosition'
 
 type WidgetAuthPanelProps = {
   onSuccess: (user: User) => void
@@ -64,8 +66,10 @@ export default function WidgetAuthPanel({ onSuccess, onClose }: WidgetAuthPanelP
     }
   }
 
+  const { position } = useWidgetTheme()
+
   return (
-    <div className="fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-0 max-md:rounded-none max-md:origin-center md:bottom-[100px] md:right-[20px] md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl md:origin-bottom-right">
+    <div className={`fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-0 max-md:rounded-none max-md:origin-center md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl ${desktopPanelClasses(position)}`}>
       {/* Header — matches CompactWidget */}
       <header className="flex shrink-0 items-center justify-between border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA] px-4 py-3 max-md:pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-2.5">

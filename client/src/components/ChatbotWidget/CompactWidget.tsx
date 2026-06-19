@@ -9,6 +9,8 @@ import MessageBubble from './MessageBubble'
 import RemiAvatar2D from './RemiAvatar2D'
 import { RateLimitBanner } from './RateLimitBanner'
 import { NavTooltip, WidgetTooltipProvider } from './NavTooltip'
+import { useWidgetTheme } from './WidgetThemeContext'
+import { desktopPanelClasses } from '../../utils/widgetPosition'
 
 export type CompactWidgetProps = {
   conversation: Conversation | null
@@ -84,10 +86,11 @@ export default function CompactWidget({
   }
 
   const hasText = input.trim().length > 0
+  const { position } = useWidgetTheme()
 
   return (
     <WidgetTooltipProvider>
-    <div className="fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:max-h-[min(92vh,640px)] max-md:rounded-t-2xl max-md:rounded-b-none md:bottom-[100px] md:right-[20px] md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl md:origin-bottom-right">
+    <div className={`fixed z-50 flex flex-col overflow-hidden border border-[#F0F0F0] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.12)] animate-widgetIn max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:max-h-[min(92vh,640px)] max-md:rounded-t-2xl max-md:rounded-b-none md:w-[350px] md:max-w-[calc(100vw-2rem)] md:rounded-2xl ${desktopPanelClasses(position)}`}>
       {/* Header */}
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#F0F0F0] bg-gradient-to-b from-white to-[#FAFAFA] px-3 py-2.5 md:px-4 md:py-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">

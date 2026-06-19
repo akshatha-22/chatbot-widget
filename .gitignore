@@ -35,6 +35,7 @@ backend/data/vector_store/
 # Build / IDE
 dist/
 client/dist/
+client/dist-lib/
 .vscode/*
 !.vscode/extensions.json
 *.log
