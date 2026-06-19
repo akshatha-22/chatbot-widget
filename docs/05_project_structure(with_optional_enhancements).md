@@ -182,6 +182,8 @@ backend/
 | `05_project_structure(...).md` | This file |
 | `06_Epics_User_stories_and_Use_cases.md` | Epics, user stories, use cases |
 | `07_deployment_guide.md` | Local + production deploy (live URLs) |
+| `08_frontend_guide.md` | React, TypeScript, widget frontend |
+| `09_known_limitations.md` | Known limitations (quota vs architecture) & future work |
 
 **Not yet in codebase:** `build:lib` embeddable package; Conversation Detail tabbed view.
 
@@ -286,4 +288,5 @@ npm run type-check
 
 - [README.md](../README.md) — quick start  
 - [07_deployment_guide.md](./07_deployment_guide.md) — production  
+- [09_known_limitations.md](./09_known_limitations.md) — known limitations & future work
 - [08_frontend_guide.md](./08_frontend_guide.md) — React/TypeScript frontend reference  

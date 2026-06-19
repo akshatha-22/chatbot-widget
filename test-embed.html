@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Remi embed test — jsDelivr</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 2rem 1.5rem 6rem;
+        background: #f4f4f5;
+        color: #1a1a1a;
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      p {
+        margin: 0.75rem 0;
+        color: #4a4a4a;
+      }
+      code {
+        font-size: 0.9em;
+        background: #e8e8e8;
+        padding: 0.15em 0.4em;
+        border-radius: 4px;
+      }
+      ul {
+        margin: 1rem 0;
+        padding-left: 1.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Remi embed test (host page)</h1>
+    <p>
+      This page is plain HTML — no React, no Vite. The widget loads from
+      <strong>jsDelivr</strong> and talks to your Railway API.
+    </p>
+    <p><strong>Expect:</strong> Remi launcher bottom-right → open → sign up / log in → chat.</p>
+    <ul>
+      <li>npm package must be published: <code>remi-widget@1.0.0</code></li>
+      <li>Railway: <code>CORS_ALLOW_ANY_ORIGIN=true</code></li>
+      <li>If CORS errors appear, redeploy the backend after setting that variable.</li>
+    </ul>
+
+    <script>
+      window.RemiConfig = {
+        apiUrl: "https://chatbot-widgetclient-production.up.railway.app",
+        primaryColor: "#2979FF",
+        position: "bottom-right",
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/remi-widget@1.0.0/dist-lib/remi-widget.js"></script>
+  </body>
+</html>

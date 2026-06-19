@@ -1,10 +1,14 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { getAuthToken } from './authToken';
+import { getApiBaseUrl } from './config';
 
-const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+function apiOrigin(): string {
+  return getApiBaseUrl().replace(/\/$/, '');
+}
 
 function attachAuthInterceptor(client: AxiosInstance) {
   client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+    config.baseURL = `${apiOrigin()}/api/v1`;
     const token = getAuthToken();
     if (token) {
       config.headers.set('Authorization', `Bearer ${token}`);
@@ -14,14 +18,14 @@ function attachAuthInterceptor(client: AxiosInstance) {
 }
 
 const apiClient = axios.create({
-  baseURL: `${API_URL}/api/v1`,
+  baseURL: `${apiOrigin()}/api/v1`,
   timeout: 15000,
   headers: { 'Content-Type': 'application/json' },
 });
 
 /** Longer timeout for uploads; embedding runs in the background on the server. */
 export const uploadClient = axios.create({
-  baseURL: `${API_URL}/api/v1`,
+  baseURL: `${apiOrigin()}/api/v1`,
   timeout: 180000,
 });
 

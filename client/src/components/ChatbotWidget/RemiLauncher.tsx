@@ -1,4 +1,6 @@
 import RemiSphere from './RemiSphere'
+import { useWidgetTheme } from './WidgetThemeContext'
+import { launcherAnchorClasses } from '../../utils/widgetPosition'
 
 type RemiLauncherProps = {
   onClick: () => void
@@ -6,9 +8,10 @@ type RemiLauncherProps = {
 }
 
 export default function RemiLauncher({ onClick, hasUnread = false }: RemiLauncherProps) {
+  const { position } = useWidgetTheme()
   return (
     <div
-      className="fixed bottom-[20px] right-[20px] z-50 flex flex-col items-center gap-1.5"
+      className={`fixed z-50 flex flex-col items-center gap-1.5 ${launcherAnchorClasses(position)}`}
       data-testid="remi-launcher"
     >
       <button

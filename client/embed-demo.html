@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Remi embed demo</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        background: #f4f4f5;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Host page (non-React)</h1>
+    <p>
+      <strong>Production CDN</strong> — jsDelivr + Railway API.
+      For local bundle testing, run <code>npm run build:lib</code> and use
+      <code>npm run preview:lib</code>, then point the script at
+      <code>/remi-widget.js</code>.
+    </p>
+
+    <script>
+      window.RemiConfig = {
+        apiUrl: "https://chatbot-widgetclient-production.up.railway.app",
+        primaryColor: "#2979FF",
+        position: "bottom-right",
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/remi-widget@1.0.0/dist-lib/remi-widget.js"></script>
+  </body>
+</html>

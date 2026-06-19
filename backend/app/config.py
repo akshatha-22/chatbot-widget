@@ -145,6 +145,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CORS_ORIGIN_REGEX", "BACKEND_CORS_ORIGIN_REGEX"),
     )
 
+    # When True, allow any origin for script-tag embeds (JWT via Authorization header, not cookies).
+    CORS_ALLOW_ANY_ORIGIN: bool = False
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def BACKEND_CORS_ORIGIN_REGEX(self) -> str | None:

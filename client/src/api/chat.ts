@@ -1,6 +1,7 @@
 import apiClient from './client'
 import { authHeaders } from './authToken'
 import { readRateLimitFromResponse } from './rateLimit'
+import { getApiBaseUrl } from './config'
 import type { TMessageSource } from '../types/chat'
 
 export interface Conversation {
@@ -68,10 +69,7 @@ export async function createConversation(title: string): Promise<Conversation> {
   return { ...data, id: String(data.id) }
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(
-  /\/$/,
-  '',
-)
+const streamApiBase = () => getApiBaseUrl().replace(/\/$/, '')
 
 export type StreamMessageHandlers = {
   onChunk: (text: string) => void
@@ -128,7 +126,7 @@ export async function streamMessage(
   handlers: StreamMessageHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const url = `${API_BASE}/api/v1/chat/conversations/${conversationId}/messages/stream`
+  const url = `${streamApiBase()}/api/v1/chat/conversations/${conversationId}/messages/stream`
 
   let response: Response
   try {

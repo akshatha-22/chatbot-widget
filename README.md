@@ -356,6 +356,7 @@ chatbot-widget/
 
 | Doc | Contents |
 | --- | --- |
+| [09_known_limitations.md](docs/09_known_limitations.md) | **Known limitations** (quota vs architecture) & future work |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Code-level reference (lifecycle, RAG, auth, security, tests) |
 | [01_system_overview.md](docs/01_system_overview.md) | System summary and workflows |
 | [02_architecture_diagrams.md](docs/02_architecture_diagrams.md) | Mermaid diagrams |
@@ -365,6 +366,7 @@ chatbot-widget/
 | [06_Epics_User_stories_and_Use_cases.md](docs/06_Epics_User_stories_and_Use_cases.md) | Has Epics, User stories and Use-cases |
 | [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
 | [08_frontend_guide.md](docs/08_frontend_guide.md) | React, TypeScript, components, hooks, API client, streaming |
+| [10_embedding_guide.md](docs/10_embedding_guide.md) | Script-tag embed (`build:lib`) on any website |
 
 ---
 
@@ -559,7 +561,7 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | Item | Status |
 | --- | --- |
 | **Conversation Detail tabs** (Messages / Files / Generated Files / Details) | Not built — `getConversationDetail()` unused |
-| **Embeddable npm package** (`build:lib` script-tag / drop-in widget) | Not built |
+| **First npm publish** | Package configured as `remi-widget`; run `npm publish` from `client/` to go live on jsDelivr |
 
 ---
 
