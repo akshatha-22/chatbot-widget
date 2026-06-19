@@ -237,7 +237,7 @@ Grouped by theme. Items marked **High** are the most impactful for the quota/dep
 | **Apply `chunk_overlap` in splitter** | Low | Parameter exists but unused in `split_text` |
 | **Citation links to page numbers** | Medium | Surface `embeddings.page` in UI citations |
 | **Corrupted-PDF test fixtures** | Low | ARCHITECTURE.md notes gap in test coverage |
-| **Frontend tests** | Medium | Stream abort, file delete UI, rate-limit banner |
+| **Frontend tests** | Medium | Embed mount covered (`client/tests/unit/embed.test.ts`, 9 tests); gaps: stream abort, file delete UI, rate-limit banner |
 
 ### E. Scaffold (files exist, not wired)
 

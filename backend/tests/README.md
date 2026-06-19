@@ -42,6 +42,16 @@ tests/
 │   ├── test_deep_extraction.py     # OCR all candidate pages
 │   ├── test_rag_quality_service.py # RAG quality tiers
 │   ├── test_two_tier_retrieval.py  # Tiered prompt routing
+│   ├── test_row_chunking.py         # Row-aware chunking
+│   ├── test_prompt_routing.py       # Prompt routing helpers
+│   ├── test_gemini_quota.py         # Fail-fast on 429, OCR worker stop
+│   ├── test_grounding_links.py      # Web search grounding links
+│   ├── test_page_coverage_honesty.py # Honest page coverage from embeddings
+│   ├── test_embedding_status.py     # Processing status transitions
+│   ├── test_exact_match_search.py   # Keyword / exact-match fallback
+│   ├── test_embedding_config.py     # Embedding model config
+│   ├── test_document_override_prompt.py  # Document override in prompts
+│   ├── test_batch_embedding.py      # Batch embed behavior
 │   ├── test_file_delete.py         # Delete atomicity, 403 non-owner
 │   └── test_network.py             # Cloudflare IP validation
 └── README.md                # This file
@@ -99,11 +109,16 @@ python -m pytest tests/test_api_auth.py -v
 ### Files (`/api/v1/chat/conversations/{id}/files`)
 - Upload, list, delete, reindex (indexing mocked in most tests)
 
-### RAG & routing (`unit/test_rag_routing.py`, `test_two_tier_retrieval.py`)
+### RAG & routing (`unit/test_rag_routing.py`, `test_two_tier_retrieval.py`, `test_prompt_routing.py`)
 - Document-first routing before web search
 - Page query direct retrieval
 - Pending file blocking
 - Web fallback when question unrelated to documents
+
+### Quota & embeddings (`test_gemini_quota.py`, `test_page_coverage_honesty.py`, `test_batch_embedding.py`)
+- Fail-fast on embedding 429
+- Honest page coverage from live `embeddings` rows
+- Batch embedding behavior
 
 ### Security & infrastructure
 - Security headers, MIME validation, body limits, sanitization
@@ -115,8 +130,9 @@ python -m pytest tests/test_api_auth.py -v
 - Real pgvector / Gemini embed API calls (mocked in API tests)
 - Real multi-page PDF OCR end-to-end against live Gemini
 - Multi-replica in-memory rate limit / cache behavior
-- Frontend file delete UI or stream abort on widget close
+- Frontend stream abort on widget close or file delete UI (embed mount covered in `client/tests/unit/embed.test.ts`)
 
 ## Last verified
 
-**191 tests** passing (`python -m pytest tests/ -v`) on Python 3.12 with dependencies from `requirements.txt`.
+**203 tests** passing (`python -m pytest tests/ -v`) on Python 3.12 with dependencies from `requirements.txt`.  
+**9 additional tests** in `client/tests/unit/embed.test.ts` (Vitest) — **212 total** across the monorepo.

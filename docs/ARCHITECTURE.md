@@ -596,33 +596,60 @@ See [§6](#6-widget-state-compact--expanded). Entry: `App.tsx` → `FloatingWidg
 
 ## 15. Tests & coverage gaps
 
-### Test modules (191 tests total)
+### Test suites (**212 tests total**)
 
-| File | Focus |
-|------|-------|
-| `backend/tests/test_api_health.py` | `/`, `/health` |
-| `backend/tests/test_api_auth.py` | signup, login, me |
-| `backend/tests/test_api_chat.py` | conversations, messages, stream |
-| `backend/tests/test_api_files.py` | upload, list, reindex |
-| `backend/tests/test_api_edge_cases.py` | isolation, PDF, generate, RAG mocks |
-| `backend/tests/test_security_features.py` | security headers, MIME, quota 429 |
-| `backend/tests/test_network.py` | `get_real_ip` proxy headers |
-| `backend/tests/unit/test_sanitizer.py` | prompt injection stripping |
-| `backend/tests/unit/test_response_cache.py` | per-user cache keys, `cache_hit` |
-| `backend/tests/unit/test_mime_validation.py` | magic-byte validation |
-| `backend/tests/unit/test_request_body_limits.py` | 1 MB / 52 MB middleware |
-| `backend/tests/unit/test_quota_service.py` | UTC reset, `reset_at` |
-| `backend/tests/unit/test_audit_service.py` | audit log writes |
-| `backend/tests/unit/test_auth_rate_limit.py` | login/signup 429 |
-| `backend/tests/unit/test_vector_store_versioning.py` | embedding version + reindex |
-| `backend/tests/unit/test_admin_embedding_health.py` | `/admin/embedding-health` |
-| `backend/tests/unit/test_rag_routing.py` | document-first routing, page queries |
-| `backend/tests/unit/test_page_extraction.py` | page chunks, extraction counts |
-| `backend/tests/unit/test_deep_extraction.py` | OCR all candidate pages |
-| `backend/tests/unit/test_rag_quality_service.py` | RAG quality tiers |
-| `backend/tests/unit/test_two_tier_retrieval.py` | tiered prompt routing |
-| `backend/tests/unit/test_file_delete.py` | delete atomicity, 403 non-owner |
-| `backend/tests/unit/test_network.py` | Cloudflare IP validation |
+| Suite | Count | Location |
+|-------|-------|----------|
+| Backend (pytest) | **203** | `backend/tests/` |
+| Frontend (Vitest) | **9** | `client/tests/unit/embed.test.ts` |
+
+Run backend: `cd backend && python -m pytest tests/ -v`  
+Run frontend: `cd client && npm run test`  
+CI runs both in `.github/workflows/ci.yml`.
+
+### Backend test modules (203)
+
+| File | Tests | Focus |
+|------|-------|-------|
+| `test_api_health.py` | 2 | `/`, `/health` |
+| `test_api_auth.py` | 11 | signup, login, me |
+| `test_api_chat.py` | 11 | conversations, messages, stream |
+| `test_api_files.py` | 10 | upload, list, reindex |
+| `test_api_edge_cases.py` | 31 | isolation, PDF, generate, RAG mocks |
+| `test_security_features.py` | 5 | security headers, MIME, quota 429 |
+| `test_network.py` | 3 | `get_real_ip` proxy headers |
+| `unit/test_sanitizer.py` | 6 | prompt injection stripping |
+| `unit/test_response_cache.py` | 2 | per-user cache keys, `cache_hit` |
+| `unit/test_mime_validation.py` | 4 | magic-byte validation |
+| `unit/test_request_body_limits.py` | 1 | 1 MB / 52 MB middleware |
+| `unit/test_quota_service.py` | 3 | UTC reset, `reset_at` |
+| `unit/test_audit_service.py` | 2 | audit log writes |
+| `unit/test_auth_rate_limit.py` | 4 | login/signup 429 |
+| `unit/test_vector_store_versioning.py` | 4 | embedding version + reindex |
+| `unit/test_admin_embedding_health.py` | 3 | `/admin/embedding-health` |
+| `unit/test_rag_routing.py` | 10 | document-first routing, page queries |
+| `unit/test_page_extraction.py` | 16 | page chunks, extraction counts |
+| `unit/test_deep_extraction.py` | 11 | OCR all candidate pages |
+| `unit/test_rag_quality_service.py` | 7 | RAG quality tiers |
+| `unit/test_two_tier_retrieval.py` | 11 | tiered prompt routing |
+| `unit/test_file_delete.py` | 1 | delete atomicity, 403 non-owner |
+| `unit/test_network.py` | 4 | Cloudflare IP validation |
+| `unit/test_gemini_quota.py` | 4 | fail-fast on embedding 429, OCR stop |
+| `unit/test_page_coverage_honesty.py` | 7 | honest page coverage from `embeddings` rows |
+| `unit/test_batch_embedding.py` | 2 | batch embed behavior |
+| `unit/test_embedding_config.py` | 2 | embedding model config |
+| `unit/test_embedding_status.py` | 2 | processing status transitions |
+| `unit/test_exact_match_search.py` | 4 | keyword / exact-match fallback |
+| `unit/test_grounding_links.py` | 5 | web search grounding links |
+| `unit/test_prompt_routing.py` | 7 | prompt routing helpers |
+| `unit/test_document_override_prompt.py` | 4 | document override in prompts |
+| `unit/test_row_chunking.py` | 4 | row-aware chunking |
+
+### Frontend test modules (9)
+
+| File | Tests | Focus |
+|------|-------|-------|
+| `client/tests/unit/embed.test.ts` | 9 | `RemiWidget` mount/unmount, auto-mount, `window.RemiConfig` |
 
 ### `conftest.py` autouse mocks
 
@@ -635,7 +662,7 @@ See [§6](#6-widget-state-compact--expanded). Entry: `App.tsx` → `FloatingWidg
 
 - No dedicated tests for real pgvector / Gemini embed API (mocked in API tests)  
 - No corrupted-PDF fixture tests  
-- No frontend tests for stream abort on widget close or file delete UI  
+- Frontend: embed mount/unmount covered (`embed.test.ts`); no tests yet for stream abort on widget close or file delete UI  
 - In-memory auth rate limit / response cache not tested under multi-replica deployment
 
 ### Remove `GEMINI_API_KEY` (Q50)
@@ -676,5 +703,9 @@ App starts; chat uses OpenAI if configured, else `_fallback_assistant_content` �
 | File delete UI | `client/src/components/ChatbotWidget/FileListItem.tsx`, `api/files.ts` |
 | Models | `backend/app/database/db.py` |
 | Widget shell | `client/src/components/ChatbotWidget/index.tsx` |
+| **Embed / script-tag** | `client/src/embed.tsx`, `client/src/embed/mount.ts`, `client/src/api/config.ts` — see [08_frontend_guide.md](./08_frontend_guide.md) §14 |
+| Widget theming (embed) | `client/src/components/ChatbotWidget/WidgetThemeContext.tsx`, `client/src/utils/widgetPosition.ts` |
+| Embed styles / lib build | `client/src/styles/embed.css`, `client/tailwind.config.embed.js`, `client/vite.config.ts` (`mode: lib`) |
+| Embed tests | `client/tests/unit/embed.test.ts` (9 Vitest) |
 | Streaming client | `client/src/api/chat.ts`, `streamSend.ts` |
 | Config | `backend/app/config.py`, repo-root `.env.local`, `client/vite.config.ts` |
