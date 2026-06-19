@@ -67,7 +67,8 @@ main.tsx
 ```bash
 npm run dev          # Vite on http://127.0.0.1:5173
 npm run build        # Production bundle → client/dist
-npm run build:lib    # Embeddable IIFE → client/dist-lib/remi-widget.js
+npm run build:lib    # Embeddable IIFE → client/dist-lib/remi-widget.js (npm package)
+npm run test         # Vitest (embed mount tests)
 npm run type-check   # tsc --noEmit
 ```
 
@@ -81,11 +82,15 @@ npm run type-check   # tsc --noEmit
 client/src/
 ├── api/                    # Backend HTTP clients
 │   ├── client.ts           # axios instances (api + upload)
+│   ├── config.ts           # setApiBaseUrl / getApiBaseUrl (embed + dev)
 │   ├── auth.ts             # signup, login, logout, getMe
 │   ├── authToken.ts        # JWT from localStorage
 │   ├── chat.ts             # conversations, messages, SSE stream
 │   ├── files.ts            # upload, list, delete
 │   └── rateLimit.ts        # RateLimitError + 429 parsing
+├── embed/
+│   └── mount.ts            # mount / unmount controller (script-tag embed)
+├── embed.tsx               # IIFE entry → window.RemiWidget
 ├── components/
 │   ├── ErrorBoundary.tsx
 │   ├── SearchFilterPanel.tsx
@@ -97,9 +102,11 @@ client/src/
 ├── types/
 │   ├── index.ts            # Conversation, Message, UploadedFile, User
 │   └── chat.ts             # TMessageSource, TExternalLink
-├── utils/                  # PDF, export, download, localStorage helpers
+├── utils/
+│   └── widgetPosition.ts   # bottom-left / bottom-right for embed
 ├── styles/
-│   └── index.css           # Tailwind directives + widget animations
+│   ├── index.css           # Tailwind directives + widget animations
+│   └── embed.css           # Scoped styles for script-tag embed
 ├── App.tsx
 └── main.tsx
 ```
@@ -529,7 +536,6 @@ Use this when navigating the codebase or onboarding.
 
 | Item | Notes |
 |------|-------|
-| **npm registry publish** | Configured as `remi-widget`; run `npm publish` from `client/` — see [10_embedding_guide.md](../docs/10_embedding_guide.md) |
 | **Conversation Detail tabs** | `getConversationDetail()` unused |
 | **Mic / voice input** | Buttons present but disabled |
 | **Regenerate response** | No UI |
@@ -572,4 +578,5 @@ sequenceDiagram
 | [03_features_capabilities.md](./03_features_capabilities.md) | Shipped vs not shipped (UI checklist) |
 | [02_architecture_diagrams.md](./02_architecture_diagrams.md) | Full-stack Mermaid diagrams |
 | [07_deployment_guide.md](./07_deployment_guide.md) | `VITE_API_URL`, Vercel build |
+| [10_embedding_guide.md](./10_embedding_guide.md) | Script-tag embed (`remi-widget` on npm + jsDelivr) |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Backend chat_service, RAG, SSE server side |

@@ -35,19 +35,28 @@ chatbot-widget/
 ```
 client/
 ├── index.html
-├── package.json
-├── vite.config.ts          # envDir → repo root; injects VITE_API_URL
+├── embed-demo.html         # Local embed bundle demo
+├── package.json            # remi-widget (npm publish from client/)
+├── vite.config.ts          # App build + lib mode (build:lib)
 ├── tailwind.config.js
+├── tailwind.config.embed.js
 ├── postcss.config.js
+├── postcss.config.embed.js
 ├── tsconfig.json
+├── scripts/verify-publish.sh
+├── dist-lib/               # build:lib output (remi-widget.js) — published to npm
 ├── vercel.json             # Optional; deploy from repo root uses root vercel.json
+├── tests/unit/embed.test.ts
 ├── public/
 └── src/
-    ├── main.tsx            # Entry (not index.tsx)
+    ├── main.tsx            # Dev app entry
+    ├── embed.tsx           # IIFE entry → window.RemiWidget
+    ├── embed/mount.ts      # mount / unmount controller
     ├── App.tsx             # Renders FloatingWidget only
     ├── vite-env.d.ts
     ├── api/
     │   ├── client.ts       # Axios + auth interceptor
+    │   ├── config.ts       # setApiBaseUrl / getApiBaseUrl (embed + dev)
     │   ├── auth.ts
     │   ├── chat.ts         # fetch SSE streamMessage + REST
     │   ├── files.ts        # multipart upload, deleteFile(), error parsing
@@ -56,6 +65,7 @@ client/
     │   └── uploadFormats.ts
     ├── components/
     │   ├── ChatbotWidget/
+    │   │   ├── WidgetThemeContext.tsx
     │   │   ├── index.tsx           # State owner, routing
     │   │   ├── FloatingWidget.tsx  # Re-export entry
     │   │   ├── RemiLauncher.tsx
@@ -83,10 +93,12 @@ client/
     │   └── useIsMobile.ts
     ├── styles/
     │   ├── index.css
+    │   ├── embed.css           # Scoped Tailwind for script-tag embed
     │   └── animations.css
     ├── types/
     │   └── index.ts
     └── utils/
+        ├── widgetPosition.ts
         ├── pdfGenerator.ts
         ├── exportConversation.ts
         ├── downloadFile.ts
@@ -184,8 +196,9 @@ backend/
 | `07_deployment_guide.md` | Local + production deploy (live URLs) |
 | `08_frontend_guide.md` | React, TypeScript, widget frontend |
 | `09_known_limitations.md` | Known limitations (quota vs architecture) & future work |
+| `10_embedding_guide.md` | Script-tag embed (`remi-widget` on npm + jsDelivr) |
 
-**Not yet in codebase:** `build:lib` embeddable package; Conversation Detail tabbed view.
+**Not yet in codebase:** Conversation Detail tabbed view.
 
 ---
 
@@ -193,7 +206,7 @@ backend/
 
 | Workflow | Trigger | Actions |
 |----------|---------|---------|
-| `ci.yml` | Push/PR `main`, `develop` | Backend pytest, frontend type-check + build |
+| `ci.yml` | Push/PR `main`, `develop` | Backend pytest; frontend type-check + build + `build:lib` + vitest |
 | `deploy.yml` | After CI on `main` or manual | Vercel production (backend deploys on Railway separately) |
 
 ---

@@ -226,4 +226,4 @@ When deploying Remi:
 | Gemini quota | `quota_service.py` |
 | Client stream | `client/src/api/chat.ts` |
 
-**Not yet built:** Conversation Detail tabs; embeddable `build:lib` npm package.
+**Not yet built:** Conversation Detail tabs.

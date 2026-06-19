@@ -118,8 +118,9 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Feature | Implementation |
 |---------|----------------|
 | Embed model | Import widget in host React app (`App.tsx`) **or** script tag via `build:lib` → `remi-widget.js` ([10_embedding_guide.md](./10_embedding_guide.md)) |
-| API base URL | `VITE_API_URL` baked at build time (`vite.config.ts`) |
-| CORS | Configurable origins + Vercel preview regex |
+| npm + CDN | [`remi-widget@1.0.0`](https://www.npmjs.com/package/remi-widget) on npm; jsDelivr / unpkg CDN |
+| API base URL | `VITE_API_URL` at build time; `apiUrl` prop or `window.RemiConfig.apiUrl` for embed |
+| CORS | Configurable origins + Vercel preview regex; `CORS_ALLOW_ANY_ORIGIN=true` for third-party embeds |
 
 **Not shipped:** iframe SDK, Shadow DOM isolation, webhooks, public API keys for third parties, WebSocket API (`VITE_WS_URL` in `.env.example` is unused).
 
@@ -168,7 +169,6 @@ What **Remi** actually ships in this repository versus aspirational ideas that a
 | Item | Notes |
 |------|-------|
 | Conversation Detail tabs | Messages / Files / Generated Files / Details — `getConversationDetail()` in `chat.ts` unused |
-| Embeddable npm package | `remi-widget` on npm + jsDelivr CDN — run `npm publish` from `client/` to go live |
 
 ---
 
@@ -203,6 +203,7 @@ Use this when demoing or writing tests:
 - [ ] Archive via ⋮ menu; see Archived tab  
 - [ ] Generate summary from Generate panel  
 - [ ] Ask “export this as pdf” in chat  
+- [ ] Embed via script tag — open [test-embed.html](../test-embed.html) or follow [10_embedding_guide.md](./10_embedding_guide.md)
 
 ---
 
@@ -212,3 +213,4 @@ Use this when demoing or writing tests:
 - [07_deployment_guide.md](./07_deployment_guide.md) — production setup
 - [08_frontend_guide.md](./08_frontend_guide.md) — React, TypeScript, widget components & functions
 - [09_known_limitations.md](./09_known_limitations.md) — known limitations & future work
+- [10_embedding_guide.md](./10_embedding_guide.md) — script-tag embed on any website
