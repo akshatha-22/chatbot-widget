@@ -39,6 +39,7 @@ Environment variables are read from `.env.local` at the **repo root** (see root 
 
 - Use **PostgreSQL with pgvector** (`DATABASE_URL` on Railway)
 - Set `GEMINI_API_KEY`, `SECRET_KEY` (32+ chars), `ENVIRONMENT=production`
+- Set `CORS_ALLOW_ANY_ORIGIN=true` when serving script-tag embeds on third-party domains (see [10_embedding_guide.md](../docs/10_embedding_guide.md))
 - Alembic runs on startup — revision chain must include `007_status_detail` → `008_pdf_page_counts`
 - Health: `GET /health`
 
@@ -54,3 +55,4 @@ See [tests/README.md](tests/README.md) — **191 tests**, pgvector mocked on SQL
 
 - [ARCHITECTURE.md](../docs/ARCHITECTURE.md) — code-level reference
 - [07_deployment_guide.md](../docs/07_deployment_guide.md) — Railway + Vercel
+- [10_embedding_guide.md](../docs/10_embedding_guide.md) — script-tag embed (`remi-widget` on npm)

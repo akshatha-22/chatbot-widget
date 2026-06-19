@@ -657,7 +657,7 @@ App starts; chat uses OpenAI if configured, else `_fallback_assistant_content` â
 | In-memory rate limit + cache per replica | Medium | Use Redis when scaling Railway horizontally |
 | Sentry / admin RBAC | Low | `SENTRY_DSN` unused; `embedding-health` is user-scoped only |
 | Conversation Detail tabs | Medium | `getConversationDetail()` unused; no tabbed detail view |
-| Embeddable `build:lib` package | Medium | No Vite library mode / script-tag bundle yet |
+| Embed: no Shadow DOM / iframe SDK | Low | Script-tag bundle ships; host-page CSS isolation via `.remi-widget-root` only |
 
 ---
 

@@ -366,7 +366,8 @@ chatbot-widget/
 | [06_Epics_User_stories_and_Use_cases.md](docs/06_Epics_User_stories_and_Use_cases.md) | Has Epics, User stories and Use-cases |
 | [07_deployment_guide.md](docs/07_deployment_guide.md) | Local dev, Vercel + Railway |
 | [08_frontend_guide.md](docs/08_frontend_guide.md) | React, TypeScript, components, hooks, API client, streaming |
-| [10_embedding_guide.md](docs/10_embedding_guide.md) | Script-tag embed (`build:lib`) on any website |
+| [09_known_limitations.md](docs/09_known_limitations.md) | Known limitations (quota vs architecture) & future work |
+| [10_embedding_guide.md](docs/10_embedding_guide.md) | Script-tag embed on any website (`remi-widget` on npm + jsDelivr) |
 
 ---
 
@@ -391,6 +392,7 @@ Copy `.env.example` → `.env.local` at the **repo root**. Both backend (`config
 | `RESPONSE_CACHE_TTL_SECONDS` | No | `3600` | Cache entry lifetime (seconds) |
 | `RESPONSE_CACHE_MAX_SIZE` | No | `500` | Max cached responses in memory |
 | `CORS_ORIGINS` | No | localhost/127.0.0.1 Vite ports | Comma-separated allowed origins |
+| `CORS_ALLOW_ANY_ORIGIN` | No | `false` | When `true`, allow any origin (for script-tag embeds on third-party sites) |
 | `CORS_ORIGIN_REGEX` | No | `https://.*\.vercel.app` | Preview deploy origin regex |
 | `CLOUDFLARE_ONLY` | No | `false` | When `true`, only trust `CF-Connecting-IP` from Cloudflare origin IPs |
 | `AUTH_RATE_LIMIT_ENABLED` | No | `true` | Per-IP login/signup brute-force protection |
@@ -508,7 +510,7 @@ npm run build
 | Job | What it runs |
 | --- | --- |
 | **Backend (pytest)** | Python 3.12 · `pip install -r requirements.txt` · `pytest tests/` |
-| **Frontend (type-check & build)** | Node 22 · `npm ci` · `npm run type-check` · `npm run build` |
+| **Frontend (type-check & build)** | Node 22 · `npm ci` · `npm run type-check` · `npm run build` · `build:lib` · `npm run test` |
 
 Triggers on push/PR to `main` and `develop`.
 
@@ -520,7 +522,7 @@ Triggers on push/PR to `main` and `develop`.
 
 | Target | Mechanism | Secret / config |
 | --- | --- | --- |
-| **Backend** | **Railway** (GitHub-connected service or `railway up`) | `DATABASE_URL`, `GEMINI_API_KEY`, `SECRET_KEY`, `CORS_ORIGINS` in Railway dashboard |
+| **Backend** | **Railway** (GitHub-connected service or `railway up`) | `DATABASE_URL`, `GEMINI_API_KEY`, `SECRET_KEY`, `CORS_ORIGINS`, `CORS_ALLOW_ANY_ORIGIN` (for third-party embeds) |
 | **Frontend** | Vercel CLI (`vercel build` + `vercel deploy --prebuilt`) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `VITE_API_URL` |
 
 If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
@@ -532,6 +534,7 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 - Set `ENVIRONMENT=production` on Railway (enables HSTS security header).
 - Set `VITE_API_URL` to your **Railway** public HTTPS API URL on Vercel (no trailing slash), then **redeploy Vercel** (env is baked at build time).
 - Add your Vercel production domain to `CORS_ORIGINS` on Railway (preview `*.vercel.app` matches default regex).
+- For **script-tag embeds** on arbitrary customer domains, set `CORS_ALLOW_ANY_ORIGIN=true` on Railway (see [10_embedding_guide.md](docs/10_embedding_guide.md)).
 - Embeddings are **persisted in PostgreSQL** (`embeddings` table with pgvector + `embedding_model_version`) so Railway redeploys do not wipe RAG. Railway Postgres must have the **pgvector** extension enabled.
 - Alembic chain includes `007_status_detail` and `008_pdf_page_counts`; migration revision IDs must match (healthcheck runs `alembic upgrade head` on startup).
 - Verify API health: `curl.exe -sS https://YOUR-RAILWAY-URL.up.railway.app/health` → `{"status":"healthy"}`
@@ -545,14 +548,38 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | `VITE_API_URL` | Set on Vercel → Railway HTTPS URL |
 | `ENVIRONMENT` | `production` on Railway (HSTS enabled) |
 | `CORS_ORIGINS` | Vercel production domain aligned with Railway |
+| `CORS_ALLOW_ANY_ORIGIN` | `true` on Railway (third-party script-tag embeds) |
+| npm embed | [`remi-widget@1.0.0`](https://www.npmjs.com/package/remi-widget) on jsDelivr |
 
 ### Production checklist
 
 - [x] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
 - [x] Railway: `CORS_ORIGINS` includes Vercel URL
+- [x] Railway: `CORS_ALLOW_ANY_ORIGIN=true` for third-party embeds
 - [x] Vercel: `VITE_API_URL` = Railway HTTPS URL; production redeploy completed
+- [x] npm: `remi-widget@1.0.0` published; jsDelivr CDN live
 - [x] Smoke test: signup → chat → upload → delete file
 - [x] Security headers + HSTS on `/health`
+
+---
+
+## Embed on any website
+
+The widget ships as an npm package and loads via a single script tag — no React or Vite required on the host page.
+
+```html
+<script>
+  window.RemiConfig = {
+    apiUrl: "https://chatbot-widgetclient-production.up.railway.app",
+    primaryColor: "#2979FF",
+    position: "bottom-right",
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/remi-widget@1.0.0/dist-lib/remi-widget.js"></script>
+```
+
+- **Package:** [`remi-widget`](https://www.npmjs.com/package/remi-widget) · **Local test:** [test-embed.html](test-embed.html)
+- **Full guide:** [docs/10_embedding_guide.md](docs/10_embedding_guide.md)
 
 ---
 
@@ -561,7 +588,6 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | Item | Status |
 | --- | --- |
 | **Conversation Detail tabs** (Messages / Files / Generated Files / Details) | Not built — `getConversationDetail()` unused |
-| **First npm publish** | Package configured as `remi-widget`; run `npm publish` from `client/` to go live on jsDelivr |
 
 ---
 
@@ -570,7 +596,7 @@ If Vercel secrets are not set, the frontend deploy step is skipped gracefully.
 | Issue | Fix |
 | --- | --- |
 | **"Loading chat…" stuck** | Ensure backend is running; refresh after login. Check browser console for API errors. |
-| **CORS errors** | Add your frontend origin to `CORS_ORIGINS` — include both `localhost` and `127.0.0.1` variants |
+| **CORS errors** | Vercel app: add origin to `CORS_ORIGINS`. Third-party embeds: set `CORS_ALLOW_ANY_ORIGIN=true` on Railway and redeploy |
 | **Gemini quota / 429** | App enforces **100 Gemini calls/user/day**; UI countdown uses server `reset_at`. Resets at UTC midnight. |
 | **Login/signup 429** | Auth rate limit (5 failed attempts/min per IP). Wait 60s or tune `AUTH_RATE_LIMIT_*`. |
 | **Widget calls localhost in prod** | Set `VITE_API_URL` on Vercel and **redeploy** frontend |
@@ -597,4 +623,4 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 **Last updated:** June 2026  
-**Status:** Production-deployed widget — pgvector RAG with document-first routing, full PDF extraction (PyMuPDF + Gemini OCR), page-aware retrieval, processing progress UI, security hardening, 191 tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs and embeddable `build:lib` package.
+**Status:** Production-deployed widget — pgvector RAG with document-first routing, full PDF extraction (PyMuPDF + Gemini OCR), page-aware retrieval, processing progress UI, security hardening, embeddable `remi-widget` package on npm + jsDelivr, 191 backend + 9 frontend tests passing, live on Vercel + Railway. Remaining: Conversation Detail tabs.

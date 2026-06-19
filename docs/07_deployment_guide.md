@@ -98,6 +98,7 @@ Rules:
 | `GEMINI_API_KEY` | Google AI Studio key |
 | `DATABASE_URL` | From Railway **PostgreSQL** plugin |
 | `CORS_ORIGINS` | `https://your-app.vercel.app` |
+| `CORS_ALLOW_ANY_ORIGIN` | `true` when serving script-tag embeds on arbitrary customer domains |
 
 ### 5.2 Railway variables (recommended)
 
@@ -247,7 +248,7 @@ Use Railway logs for `[RAG]`, `[EMBED]`, OCR progress, sanitization info lines.
 | `301` on curl without `https://` | Use `curl.exe -sS https://...` |
 | Wrong health JSON (`RDF AB Challenge`, etc.) | Wrong Railway service URL — use Remi API URL |
 | Widget calls `localhost:8000` in prod | Set `VITE_API_URL` on Vercel, **redeploy** |
-| CORS error | Add Vercel URL to Railway `CORS_ORIGINS` |
+| CORS error | Vercel app: add URL to Railway `CORS_ORIGINS`. Third-party embed: set `CORS_ALLOW_ANY_ORIGIN=true` and redeploy |
 | No security headers | `ENVIRONMENT=production` + redeploy latest backend |
 | Login 429 | Auth rate limit — wait 60s |
 | Gemini 429 | Daily quota — UI uses `reset_at` from server |
@@ -260,10 +261,13 @@ Use Railway logs for `[RAG]`, `[EMBED]`, OCR progress, sanitization info lines.
 
 - [x] Railway: `SECRET_KEY`, `GEMINI_API_KEY`, `DATABASE_URL` (Postgres), `ENVIRONMENT=production`
 - [x] Railway: `CORS_ORIGINS` = Vercel production URL
+- [x] Railway: `CORS_ALLOW_ANY_ORIGIN=true` (third-party script-tag embeds)
 - [x] Vercel: `VITE_API_URL` = `https://chatbot-widgetclient-production.up.railway.app`; redeploy completed
+- [x] npm: `remi-widget@1.0.0` published; jsDelivr CDN live
 - [x] `curl.exe -sS https://chatbot-widgetclient-production.up.railway.app/health` → `{"status":"healthy"}`
 - [x] Security headers + HSTS visible on `/health`
 - [x] Smoke: signup → chat → upload → delete file on https://chatbot-widget-client.vercel.app
+- [x] Embed smoke: [test-embed.html](../test-embed.html) loads jsDelivr bundle and connects to Railway API
 
 ---
 
@@ -272,3 +276,4 @@ Use Railway logs for `[RAG]`, `[EMBED]`, OCR progress, sanitization info lines.
 - [01_system_overview.md](./01_system_overview.md)
 - [03_features_capabilities.md](./03_features_capabilities.md)
 - [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md)
+- [10_embedding_guide.md](./10_embedding_guide.md)

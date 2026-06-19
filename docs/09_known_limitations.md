@@ -151,7 +151,7 @@ Beyond Google API quota — documented in [ARCHITECTURE.md](./ARCHITECTURE.md) �
 | Page-query cache bypass | Stale cached answers don’t hide failed indexing | `chat_service` page routing (see `test_page_coverage_honesty.py`) |
 | Processing progress UI | `extracting` / `embedding` + `status_detail` | `files.py`, `FileListItem.tsx` |
 | **Script-tag embed bundle** | `npm run build:lib` → `dist-lib/remi-widget.js` | `embed.tsx`, `embed/mount.ts`, [10_embedding_guide.md](./10_embedding_guide.md) |
-| **npm + jsDelivr distribution** | **Shipped** — `remi-widget` package config; `prepublishOnly` builds bundle; jsDelivr after `npm publish` | `client/package.json`, [10_embedding_guide.md](./10_embedding_guide.md) |
+| **npm + jsDelivr distribution** | **Shipped** — `remi-widget@1.0.0` on npm; jsDelivr / unpkg CDN live | `client/package.json`, [10_embedding_guide.md](./10_embedding_guide.md) |
 
 ### Portfolio / resume framing (accurate to what shipped)
 
@@ -257,7 +257,7 @@ If the goal is to harden the **free-tier → production** path:
 2. **Quota-aware resume** — checkpoint `file_id` + last embedded `chunk_index` / page
 3. **Upload queue** — decouple long OCR/embed jobs from request thread
 4. **Redis** — when scaling beyond one Railway replica
-5. **First `npm publish`** — from `client/` to activate jsDelivr CDN URLs (see [10_embedding_guide.md](./10_embedding_guide.md))
+5. **Bump `remi-widget` version** — when releasing embed bundle updates; republish from `client/` (see [10_embedding_guide.md](./10_embedding_guide.md))
 
 ---
 

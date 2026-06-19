@@ -2,14 +2,14 @@
 
 Drop the Remi chat widget into **any** site — plain HTML, WordPress, Webflow, Wix, or a React app — without requiring the host to run Vite or import your monorepo.
 
-**npm package:** [`remi-widget`](https://www.npmjs.com/package/remi-widget) (unscoped name — available on npm registry)  
+**Status:** **Shipped** — [`remi-widget@1.0.0`](https://www.npmjs.com/package/remi-widget) published on npm; served globally via jsDelivr and unpkg.  
 **Build output:** `client/dist-lib/remi-widget.js` (single self-contained IIFE with React + CSS injected).
 
 ---
 
 ## CDN Hosting via jsDelivr (production)
 
-Once published to npm, `remi-widget.js` is automatically served by [jsDelivr](https://www.jsdelivr.com/package/npm/remi-widget)'s global CDN at no cost.
+`remi-widget.js` is served by [jsDelivr](https://www.jsdelivr.com/package/npm/remi-widget)'s global CDN at no cost.
 
 ### Pinned version (recommended for production)
 
@@ -185,11 +185,11 @@ Open `embed-demo.html` and point the script `src` at `http://127.0.0.1:4174/remi
    (jsDelivr may take a few minutes to pick up a fresh publish.)
 5. Update pinned version references in this guide and on any demo/portfolio sites.
 
-**First-time publish checklist:**
+**Publish checklist (new versions):**
 
 ```bash
 cd client
-npm login                    # npmjs.com account
+npm login                    # npmjs.com account (first time only)
 npm run verify-publish
 npm publish                  # unscoped — no --access public needed
 ```

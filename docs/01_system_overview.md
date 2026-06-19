@@ -21,6 +21,7 @@ Remi is a **self-contained React widget** plus a **FastAPI API** that provides:
 - **Conversation history**, dashboard **Search & Filter** UI (text, date, file, status filters), and **mobile-responsive** expanded layout
 - **Visual identity** — dark launcher sphere with soft blue radial halo (`RemiFace.tsx`); file delete UX on desktop and mobile with optimistic UI + toast
 - **Production deployment** — frontend on Vercel, API on Railway, `VITE_API_URL` + `CORS_ORIGINS` + `ENVIRONMENT=production` aligned
+- **Script-tag embed** — `remi-widget@1.0.0` on npm + jsDelivr; `build:lib` IIFE bundle for any host site ([10_embedding_guide.md](./10_embedding_guide.md))
 
 There is **no** LangChain, Redis, Celery, WebSocket server, or moderation pipeline in the running application.
 
@@ -232,7 +233,6 @@ Hardening complete: `VITE_API_URL` on Vercel, `ENVIRONMENT=production` on Railwa
 | Item | Status |
 |------|--------|
 | Conversation Detail tabs (Messages / Files / Generated Files / Details) | Not built |
-| Embeddable npm package (`build:lib` drop-in widget) | Not built |
 
 ---
 
@@ -262,4 +262,5 @@ Use `DATABASE_URL=sqlite:///./chatbot.db` for local dev without PostgreSQL.
 | [05_project_structure(with_optional_enhancements).md](./05_project_structure(with_optional_enhancements).md) | Directory tree |
 | [07_deployment_guide.md](./07_deployment_guide.md) | Deploy and env vars |
 | [08_frontend_guide.md](./08_frontend_guide.md) | React, TypeScript, widget components & API client |
+| [10_embedding_guide.md](./10_embedding_guide.md) | Script-tag embed (`remi-widget` on npm + jsDelivr) |
 | [../README.md](../README.md) | Quick start and API reference |
